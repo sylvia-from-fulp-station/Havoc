@@ -30,23 +30,24 @@ import java.util.*;
 import java.util.function.*;
 import haven.render.*;
 
-import static haven.Sprite.decnum;
-
 public class ResDrawable extends Drawable implements EquipTarget {
     public final Indir<Resource> res;
     public final Resource rres;
     public final Sprite spr;
-    public MessageBuf sdt;
-    // private double delay = 0; XXXRENDER
-	private final String resid;
+    MessageBuf sdt;
 
-    public ResDrawable(Gob gob, Indir<Resource> res, Message sdt) {
+    public ResDrawable(Gob gob, Indir<Resource> res, Message sdt, boolean old) {
 	super(gob);
 	this.res = res;
 	this.sdt = new MessageBuf(sdt);
 	this.rres = res.get();
 	spr = Sprite.create(gob, rres, this.sdt.clone());
-	resid = makeResId();
+	if(old || true)
+	    spr.age();
+    }
+
+    public ResDrawable(Gob gob, Indir<Resource> res, Message sdt) {
+	this(gob, res, sdt, false);
     }
 
     public ResDrawable(Gob gob, Resource res) {
@@ -73,10 +74,6 @@ public class ResDrawable extends Drawable implements EquipTarget {
 
     public Resource getres() {
 	return(rres);
-    }
-
-    public Skeleton.Pose getpose() {
-	return(Skeleton.getpose(spr));
     }
 
     public Gob.Placer placer() {
@@ -116,32 +113,8 @@ public class ResDrawable extends Drawable implements EquipTarget {
 		((Sprite.CUpd)d.spr).update(sdt);
 		d.sdt = sdt;
 	    } else if((d == null) || (d.res != res) || !d.sdt.equals(sdt)) {
-		g.setattr(new ResDrawable(g, res, sdt));
+		g.setattr(new ResDrawable(g, res, sdt, msg.old));
 	    }
-		g.updateResPeekDependantHighlights(sdt);
-		g.drawableUpdated();
 	}
     }
-
-	@Override
-	public String resId() {return resid;}
-
-	public String makeResId() {
-		String name = res.get().name;
-		String extra = null;
-		int state =  sdtnum();
-		if(name.endsWith("/pow")) {//fire
-			if(state == 17 || state == 33) { // this fire is actually hearth fire
-				extra = "hearth";
-			}
-		}
-		return extra == null ? name : String.format("%s[%s]", name, extra);
-	}
-	public int sdtnum() {
-		if (sdt != null) {
-			Message msg = sdt.clone();
-			return msg.eom() ? 0xffff000 : decnum(msg);
-		}
-		return 0;
-	}
 }

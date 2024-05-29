@@ -26,23 +26,16 @@
 
 package haven;
 
-import haven.automated.helpers.FarmingStatic;
-import haven.automated.cookbook.RecipeCollector;
-import haven.res.ui.tt.q.qbuff.QBuff;
-import haven.res.ui.tt.q.quality.Quality;
-
-import java.awt.*;
-import java.awt.image.BufferedImage;
-import java.lang.reflect.Field;
-import java.util.List;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import haven.render.*;
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.image.BufferedImage;
 
-public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owner {
+public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owner, RandomSource {
     public Indir<Resource> res;
     public MessageBuf sdt;
     public int meter = 0;
-	public long meterUpdated = 0; //last time meter was updated, ms
     public int num = -1;
     public Widget contents = null;
     public String contentsnm = null;
@@ -54,22 +47,30 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
     private GSprite spr;
     private ItemInfo.Raw rawinfo;
     private List<ItemInfo> info = Collections.emptyList();
-	public boolean sendttupdate = false;
-	public double studytime = 0.0;
-	private QBuff quality;
-	private boolean postProcessed = false;
 
     @RName("item")
     public static class $_ implements Factory {
 	public Widget create(UI ui, Object[] args) {
-	    int res = (Integer)args[0];
-	    Message sdt = (args.length > 1)?new MessageBuf((byte[])args[1]):Message.nil;
-	    return(new GItem(ui.sess.getres(res), sdt));
+	    Indir<Resource> res = ui.sess.getresv(args[0]);
+	    Message sdt = (args.length > 1) ? new MessageBuf((byte[])args[1]) : Message.nil;
+	    return(new GItem(res, sdt));
 	}
     }
 
-    public interface ColorInfo {
+    public interface RStateInfo {
+	public Pipe.Op rstate();
+    }
+
+    public interface ColorInfo extends RStateInfo {
 	public Color olcol();
+
+	public default Pipe.Op rstate() {
+	    return(buf -> {
+		    Color col = olcol();
+		    if(col != null)
+			new ColorMask(col).apply(buf);
+		});
+	}
     }
 
     public interface OverlayInfo<T> {
@@ -102,7 +103,7 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
 	}
 
 	public default Tex overlay() {
-	    return(new TexI(GItem.NumberInfo.numrenderStroked(itemnum(), numcolor(), true)));
+	    return(new TexI(GItem.NumberInfo.numrender(itemnum(), numcolor())));
 	}
 
 	public default void drawoverlay(GOut g, Tex tex) {
@@ -111,15 +112,6 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
 
 	public static BufferedImage numrender(int num, Color col) {
 	    return(Utils.outline2(Text.render(Integer.toString(num), col).img, Utils.contrast(col)));
-	}
-	public static BufferedImage numrenderStroked(int num, Color col, boolean thick) {
-		return(Utils.outline2(Text.render(Integer.toString(num), col).img, Color.BLACK, thick));
-	}
-	public static BufferedImage numrenderStrokedDecimal(double num, Color col, boolean thick) {
-		return(Utils.outline2(Text.render(String.format( "%.1f", num), col).img, Color.BLACK, thick));
-	}
-	public static BufferedImage textrenderStroked(String string, Color col, boolean thick) {
-		return(Utils.outline2(Text.render(string, col).img, Color.BLACK, thick));
 	}
     }
 
@@ -161,96 +153,28 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
 	.add(Glob.class, wdg -> wdg.ui.sess.glob)
 	.add(Session.class, wdg -> wdg.ui.sess);
     public <T> T context(Class<T> cl) {return(ctxr.context(cl, this));}
-    @Deprecated
-    public Glob glob() {return(ui.sess.glob);}
 
     public GSprite spr() {
 	GSprite spr = this.spr;
 	if(spr == null) {
 	    try {
 		spr = this.spr = GSprite.create(this, res.get(), sdt.clone());
-			if (!postProcessed) {
-				dropIfRequired();
-				postProcessed = true;
-			}
 	    } catch(Loading l) {
 	    }
 	}
 	return(spr);
     }
 
-	public String resname(){
-		Resource res = resource();
-		if(res != null){
-			return res.name;
-		}
-		return "";
-	}
-
     public void tick(double dt) {
 	super.tick(dt);
 	GSprite spr = spr();
 	if(spr != null)
 	    spr.tick(dt);
-	updateQuality();
 	updcontinfo();
 	if(!hoverset)
 	    hovering = null;
 	hoverset = false;
     }
-
-	private final AtomicBoolean needUpdateQuality = new AtomicBoolean();
-
-	private void updateQuality() {
-		if (needUpdateQuality.get()) {
-			needUpdateQuality.set(false);
-			try {
-				List<ItemInfo> info = this.info;
-				if (info != null && !info.isEmpty()) {
-					synchronized (infoSync) {
-						info = this.info;
-						if (info != null && !info.isEmpty()) {
-							Widget stack = contents;
-							if (stack != null) {
-								List<WItem> ret = new ArrayList<>();
-								if (stack.getClass().toString().contains("ItemStack")) {
-									try {
-										Field fwmap = stack.getClass().getField("wmap");
-										Map<GItem, WItem> wmap = (Map<GItem, WItem>) fwmap.get(stack);
-										ret.addAll(wmap.values());
-									} catch (IllegalAccessException | NoSuchFieldException e) {
-										throw (new RuntimeException(e));
-									}
-								}
-								if (!ret.isEmpty()) {
-									int amount = 0;
-									double sum = 0;
-									for (WItem w : ret) {
-										QBuff q = w.item.quality();
-										if (q != null) {
-											amount++;
-											sum += q.q;
-										}
-									}
-									if (amount > 0) {
-										Quality q = ItemInfo.find(Quality.class, info);
-										if (q == null) {
-											info.add(new Quality(this, sum / amount, true));
-										} else {
-											q.q = sum / amount;
-											quality().qtex = q.overlay();
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			} catch (Throwable e) {
-				needUpdateQuality.set(true);
-			}
-		}
-	}
 
     public List<ItemInfo> info() {
 	if(this.info == null) {
@@ -260,12 +184,6 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
 	    if(pg != null)
 		info.add(new ItemInfo.Pagina(this, pg.text));
 	    this.info = info;
-		try {
-			GameUI.recipeCollector.addFood(info, getres().name);
-		} catch (NullPointerException ex){
-			System.out.println("Problem with adding new food to cookbook.");
-		}
-		needUpdateQuality.set(true);
 	}
 	return(this.info);
     }
@@ -282,38 +200,32 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
 
     public void uimsg(String name, Object... args) {
 	if(name == "num") {
-	    num = (Integer)args[0];
+	    num = Utils.iv(args[0]);
 	} else if(name == "chres") {
 	    synchronized(this) {
-		res = ui.sess.getres((Integer)args[0]);
-		sdt = (args.length > 1)?new MessageBuf((byte[])args[1]):MessageBuf.nil;
+		res = ui.sess.getresv(args[0]);
+		sdt = (args.length > 1) ? new MessageBuf((byte[])args[1]) : MessageBuf.nil;
 		spr = null;
 	    }
 	} else if(name == "tt") {
 	    info = null;
 	    rawinfo = new ItemInfo.Raw(args);
-		if (sendttupdate) {
-			wdgmsg("ttupdate");
-		}
 	    infoseq++;
-		meterUpdated = System.currentTimeMillis();
 	} else if(name == "meter") {
-	    meter = (int)((Number)args[0]).doubleValue();
+	    meter = Utils.iv(args[0]);
 	} else if(name == "contopen") {
 	    if(contentswnd != null) {
 		boolean nst;
 		if(args[0] == null)
 		    nst = (contentswnd.st != "wnd");
 		else
-		    nst = ((Integer)args[0]) != 0;
+		    nst = Utils.bv(args[0]);
 		contentswnd.wndshow(nst);
 	    }
 	} else {
 	    super.uimsg(name, args);
 	}
     }
-
-	private final Object infoSync = new Object();
 
     public void addchild(Widget child, Object... args) {
 	/* XXX: Update this to use a checkable args[0] once a
@@ -325,12 +237,7 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
 	    contentsid = null;
 	    if(args.length > 2)
 		contentsid = args[2];
-		if(this.parent instanceof Equipory){
-			Equipory equipory = (Equipory) this.parent;
-			contentswnd = contparent().add(new ContentsWindow(this, contents, equipory.player));
-		} else {
-			contentswnd = contparent().add(new ContentsWindow(this, contents, false));
-		}
+	    contentswnd = contparent().add(new ContentsWindow(this, contents));
 	}
     }
 
@@ -494,25 +401,21 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
     public static class ContentsWindow extends Window {
 	public static final Coord overlap = UI.scale(2, 2);
 	public final GItem cont;
-	public final boolean player;
 	public final Widget inv;
 	private final Object id;
 	private Coord psz = null;
 	private String st;
 	private boolean hovering;
 
-	public ContentsWindow(GItem cont, Widget inv, boolean player) {
+	public ContentsWindow(GItem cont, Widget inv) {
 	    super(Coord.z, cont.contentsnm);
 	    this.cont = cont;
-		this.player = player;
-		this.inv = add(inv, Coord.z);
+	    this.inv = add(inv, Coord.z);
 	    this.id = cont.contentsid;
 	    this.tick(0);
 	    Coord c = null;
-		if (Utils.getprefb("alwaysOpenBeltOnLogin", false) && String.format("%s",this.id).equals("toolbelt")) {
-			c = Utils.getprefc(String.format("cont-wndc/%s", this.id), null);
-		} else if(Utils.getprefb(String.format("cont-wndvis/%s", id), false))
-			c = Utils.getprefc(String.format("cont-wndc/%s", id), null);
+	    if(Utils.getprefb(String.format("cont-wndvis/%s", id), false))
+		c = Utils.getprefc(String.format("cont-wndc/%s", id), null);
 	    if(c != null) {
 		this.c = c;
 		chstate("wnd");
@@ -598,10 +501,7 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
 	}
 
 	public void wdgmsg(Widget sender, String msg, Object... args) {
-		if(msg.equals("take") && this.parent != null && this.parent instanceof StudyInventory && OptWnd.lockStudyWindowCheckBox.a) {
-			return;
-		}
-		if((sender == this) && (msg == "close")) {
+	    if((sender == this) && (msg == "close")) {
 		chstate("hide");
 	    } else {
 		super.wdgmsg(sender, msg, args);
@@ -641,82 +541,4 @@ public class GItem extends AWidget implements ItemInfo.SpriteOwner, GSprite.Owne
 	    }
 	}
     }
-
-	public void qualitycalc(List<ItemInfo> infolist) {
-		for (ItemInfo info : infolist) {
-			if (info instanceof QBuff) {
-				this.quality = (QBuff) info;
-				break;
-			}
-		}
-	}
-
-	public QBuff quality() {
-		if (quality == null) {
-			try {
-				for (ItemInfo info : info()) {
-					if (info instanceof ItemInfo.Contents) {
-						qualitycalc(((ItemInfo.Contents) info).sub);
-						return quality;
-					}
-				}
-				qualitycalc(info());
-			} catch (Loading l) {
-			}
-		}
-		return quality;
-	}
-
-	public String getname() {
-		if (rawinfo == null) {
-			return "it's null";
-		}
-		try {
-			return ItemInfo.find(ItemInfo.Name.class, info()).str.text;
-		} catch (Exception ex) {
-			return "exception";
-		}
-	}
-
-	public ItemInfo.Contents getcontents() {
-		try {
-			for (ItemInfo info : info()) {
-				if (info instanceof ItemInfo.Contents)
-					return (ItemInfo.Contents) info;
-			}
-		} catch (Exception ignored) {
-		}
-		return null;
-	}
-
-	private void dropIfRequired() {
-		Resource curs = ui.root.getcurs(Coord.z);
-		String name = this.resource().basename();
-		if(FarmingStatic.turnipDrop && name.equals("turnip")){
-			this.wdgmsg("drop", Coord.z);
-		}
-		if (curs != null && curs.name.equals("gfx/hud/curs/mine")) {
-			double quality = 0.0;
-			if(this.rawinfo != null){
-				quality = this.info().stream().filter(info -> info instanceof Quality).mapToDouble(info -> ((Quality) info).q).findFirst().orElse(0.0);
-			}
-			if (OptWnd.toggleDropItemsCheckBox.a && (
-					(OptWnd.dropStoneCheckbox.a && Config.mineablesStone.contains(name) && getDropQualitySetting(OptWnd.dropStoneQualityTextEntry) > quality) ||
-					(OptWnd.dropOreCheckbox.a && Config.mineablesOre.contains(name) && getDropQualitySetting(OptWnd.dropOreQualityTextEntry) > quality) ||
-					(OptWnd.dropPreciousOreCheckbox.a && Config.mineablesOrePrecious.contains(name) && getDropQualitySetting(OptWnd.dropPreciousOreQualityTextEntry) > quality) ||
-					(OptWnd.dropMinedCuriosCheckbox.a && Config.mineablesCurios.contains(name) && getDropQualitySetting(OptWnd.dropMinedCuriosQualityTextEntry) > quality) ||
-					(OptWnd.dropQuarryartzCheckbox.a && "quarryquartz".equals(name) && getDropQualitySetting(OptWnd.dropQuarryartzQualityTextEntry) > quality)))
-			{
-				this.wdgmsg("drop", Coord.z);
-			}
-		}
-	}
-
-	private int getDropQualitySetting(TextEntry textEntry){
-		try {
-			return Integer.parseInt(textEntry.text());
-		} catch (NumberFormatException ex){
-			return 0;
-		}
-	}
 }

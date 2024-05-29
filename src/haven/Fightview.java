@@ -26,16 +26,7 @@
 
 package haven;
 
-import haven.sprites.AggroCircleSprite;
-
-import javax.sound.sampled.AudioFormat;
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import java.awt.*;
-import java.io.File;
 import java.util.*;
-import java.util.List;
-
 import static haven.Utils.uint32;
 
 public class Fightview extends Widget {
@@ -52,10 +43,8 @@ public class Fightview extends Widget {
     public final Map<Long, Widget> obinfo = new HashMap<>();
     public final Rellist lsdisp;
     public Relation current = null;
-	public boolean currentChanged = false;
     public Indir<Resource> blk, batk, iatk;
-    public double atkcs, atkct, lastMoveCooldown, lastMoveCooldownSeconds;
-	public Boolean lastMoveUpdated = false;
+    public double atkcs, atkct;
     public Indir<Resource> lastact = null;
     public double lastuse = 0;
     public Mainrel curdisp;
@@ -64,18 +53,11 @@ public class Fightview extends Widget {
     public class Relation {
         public final long gobid;
 	public final Bufflist buffs = add(new Bufflist()); {buffs.hide();}
-	public boolean autopeaced = false;
 	public final Bufflist relbuffs = add(new Bufflist()); {relbuffs.hide();}
 	public int gst, ip, oip;
 	public Indir<Resource> lastact = null;
-	public Long lastActCleave = null;
-	public Long lastActDefence = null;
-	public Long lastDefenceDuration = null;
 	public double lastuse = 0;
 	public boolean invalid = false;
-
-	public double minAgi = 0D;
-	public double maxAgi = 2D;
 
         public Relation(long gobid) {
             this.gobid = gobid;
@@ -94,64 +76,7 @@ public class Fightview extends Widget {
 	public void use(Indir<Resource> act) {
 	    lastact = act;
 	    lastuse = Utils.rtime();
-		try {
-			if (lastact.get() != null && lastact.get().name.endsWith("cleave")) {
-				for (Buff buff : buffs.children(Buff.class)) {
-					if (buff.res != null && buff.res.get() != null) {
-						String name = buff.res.get().name;
-						if (Fightsess.maneuvers.contains(name)) {
-							if (name.equals("paginae/atk/combmed")) {
-								int meterValue = 0;
-								Double meterDouble = (buff.ameter >= 0) ? Double.valueOf(buff.ameter / 100.0) : buff.getAmeteri().get();
-								if (meterDouble != null) {
-									meterValue = (int) (100 * meterDouble);
-								}
-								if (meterValue < 1) {
-									lastActCleave = System.currentTimeMillis();
-								}
-								break;
-							} else {
-								lastActCleave = System.currentTimeMillis();
-							}
-						}
-					}
-				}
-			}
-			if (lastact.get() != null && (Fightsess.nonAttackDefences.keySet().stream().anyMatch(lastact.get().name::matches))){
-				lastActDefence = System.currentTimeMillis();
-				lastDefenceDuration = Fightsess.nonAttackDefences.get(lastact.get().name);
-			}
-		} catch (Loading ignored) {}
-		playCombatSoundEffect(lastact);
 	}
-
-		public void tick() {
-			final Gob g = ui.sess.glob.oc.getgob(gobid);
-			if (OptWnd.aggroedEnemiesCirclesCheckBox.a && g != null && /*g.getres().name.equals("gfx/borka/body") &&*/ g.findol(AggroCircleSprite.id) == null) {
-				g.daddol(AggroCircleSprite.id, new AggroCircleSprite(g));
-			} else if (!OptWnd.aggroedEnemiesCirclesCheckBox.a && g != null) {
-				final Gob.Overlay ol = g.findol(AggroCircleSprite.id);
-				if (ol != null) {
-					final AggroCircleSprite am = (AggroCircleSprite) ol.spr;
-					if (am != null) {
-						am.rem();
-					}
-				}
-			}
-		}
-
-		public void destroy() {
-			final Gob g = ui.sess.glob.oc.getgob(gobid);
-			if (g != null) {
-				final Gob.Overlay ol = g.findol(AggroCircleSprite.id);
-				if (ol != null) {
-					final AggroCircleSprite am = (AggroCircleSprite) ol.spr;
-					if (am != null) {
-						am.rem();
-					}
-				}
-			}
-		}
     }
 
     public class Relbox extends Widget {
@@ -262,9 +187,6 @@ public class Fightview extends Widget {
     public void use(Indir<Resource> act) {
 	lastact = act;
 	lastuse = Utils.rtime();
-	playCombatSoundEffect(lastact);
-	if (currentChanged) lastMoveUpdated = false;
-	currentChanged = false;
     }
     
     @RName("frv")
@@ -286,10 +208,10 @@ public class Fightview extends Widget {
 	    if(args[1] == null)
 		p = buffs;
 	    else
-		p = getrel((Integer)args[1]).buffs;
+		p = getrel(Utils.uiv(args[1])).buffs;
 	    p.addchild(child);
 	} else if(args[0].equals("relbuff")) {
-	    getrel((Integer)args[1]).relbuffs.addchild(child);
+	    getrel(Utils.uiv(args[1])).relbuffs.addchild(child);
 	} else {
 	    super.addchild(child, args);
 	}
@@ -354,34 +276,17 @@ public class Fightview extends Widget {
 	if(rel != null) {
 	    add(curdisp = new Mainrel(rel));
 	}
-	currentChanged = true;
 	current = rel;
-		if (current != null) {
-			ui.gui.lastopponent = current.gobid;
-		}
 	layout();
 	updrel();
-
     }
     
     public void tick(double dt) {
 	super.tick(dt);
 	for(Relation rel : lsrel) {
-		rel.tick();
 	    Widget inf = obinfo(rel.gobid, false);
 	    if(inf != null)
 		inf.tick(dt);
-		try { // ND: "curdisp.give.state != 1" can throw nullpointer for a frame or something, but the functionality still works using try/catch block
-			if (OptWnd.toggleAutoPeaceCheckbox.a && !rel.autopeaced && curdisp.give.state != 1) {
-				synchronized (ui.sess.glob) {
-					Gob curgob = ui.sess.glob.oc.getgob(rel.gobid);
-					if (curgob != null && !curgob.getres().name.contains("gfx/borka")) {
-						wdgmsg("give", (int)rel.gobid, 1);
-					}
-					rel.autopeaced = true;
-				}
-			}
-		} catch (Exception ignored) {}
 	}
     }
 
@@ -402,49 +307,39 @@ public class Fightview extends Widget {
         throw(new Notfound(gobid));
     }
 
-    private Indir<Resource> n2r(int num) {
-	if(num < 0)
-	    return(null);
-	return(ui.sess.getres(num));
-    }
     public void uimsg(String msg, Object... args) {
         if(msg == "new") {
-            Relation rel = new Relation(uint32((Integer)args[0]));
-	    rel.give((Integer)args[1]);
-	    rel.ip = (Integer)args[2];
-	    rel.oip = (Integer)args[3];
+            Relation rel = new Relation(Utils.uiv(args[0]));
+	    rel.give(Utils.iv(args[1]));
+	    rel.ip = Utils.iv(args[2]);
+	    rel.oip = Utils.iv(args[3]);
             lsrel.addFirst(rel);
 	    updrel();
-		ui.sess.glob.oc.gobAction(Gob::hidingBoxUpdated);
-		ui.sess.glob.oc.gobAction(Gob::collisionBoxUpdated);
             return;
         } else if(msg == "del") {
-            Relation rel = getrel(uint32((Integer)args[0]));
+            Relation rel = getrel(Utils.uiv(args[0]));
 	    rel.remove();
-		rel.destroy();
-		lsrel.remove(rel);
+            lsrel.remove(rel);
 	    if(rel == current)
 		setcur(null);
 	    updrel();
-		ui.sess.glob.oc.gobAction(Gob::hidingBoxUpdated);
-		ui.sess.glob.oc.gobAction(Gob::collisionBoxUpdated);
             return;
         } else if(msg == "upd") {
-            Relation rel = getrel(uint32((Integer)args[0]));
-	    rel.give((Integer)args[1]);
-	    rel.ip = (Integer)args[2];
-	    rel.oip = (Integer)args[3];
+            Relation rel = getrel(Utils.uiv(args[0]));
+	    rel.give(Utils.iv(args[1]));
+	    rel.ip = Utils.iv(args[2]);
+	    rel.oip = Utils.iv(args[3]);
             return;
 	} else if(msg == "used") {
-	    use((args[0] == null)?null:ui.sess.getres((Integer)args[0]));
+	    use((args[0] == null) ? null : ui.sess.getresv(args[0]));
 	    return;
 	} else if(msg == "ruse") {
-	    Relation rel = getrel(uint32((Integer)args[0]));
-	    rel.use((args[1] == null)?null:ui.sess.getres((Integer)args[1]));
+	    Relation rel = getrel(Utils.uiv(args[0]));
+	    rel.use((args[1] == null) ? null : ui.sess.getresv(args[1]));
 	    return;
         } else if(msg == "cur") {
             try {
-                Relation rel = getrel(uint32((Integer)args[0]));
+                Relation rel = getrel(Utils.uiv(args[0]));
                 lsrel.remove(rel);
                 lsrel.addFirst(rel);
 		setcur(rel);
@@ -454,63 +349,16 @@ public class Fightview extends Widget {
             return;
 	} else if(msg == "atkc") {
 	    atkcs = Utils.rtime();
-	    atkct = atkcs + (((Number)args[0]).doubleValue() * 0.06);
-		lastMoveCooldown = ((Number)args[0]).doubleValue();
-		lastMoveCooldownSeconds = lastMoveCooldown * 0.06;
-		lastMoveUpdated = true;
+	    atkct = atkcs + (Utils.dv(args[0]) * 0.06);
 	    return;
 	} else if(msg == "blk") {
-	    blk = n2r((Integer)args[0]);
+	    blk = ui.sess.getresv(args[0]);
 	    return;
 	} else if(msg == "atk") {
-	    batk = n2r((Integer)args[0]);
-	    iatk = n2r((Integer)args[1]);
+	    batk = ui.sess.getresv(args[0]);
+	    iatk = ui.sess.getresv(args[1]);
 	    return;
 	}
         super.uimsg(msg, args);
     }
-
-	public void playCombatSoundEffect(Indir<Resource> lastact){
-		if (lastact != null ) {
-			try {
-				Resource res = lastact.get();
-				Resource.Tooltip tt = res.layer(Resource.tooltip);
-				if (tt == null) { // ND: Took this code from Matias. I wonder what tooltip it's referring to. Maybe some combat moves had some missing stuff in the past?
-					ui.gui.syslog.append("Combat: WARNING! tooltip is missing for " + res.name + ". Notify Jorb/Loftar about this.", new Color(234, 105, 105));
-					return;
-				}
-
-				if(OptWnd.cleaveSoundEnabledCheckbox.a && res.basename().endsWith("cleave")) {
-					try {
-						File file = new File("Alarms/" + OptWnd.cleaveSoundFilename.buf.line() + ".wav");
-						if(!file.exists()) {
-							return;
-						}
-						AudioInputStream in = AudioSystem.getAudioInputStream(file);
-						AudioFormat tgtFormat = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, 44100, 16, 2,4, 44100, false);
-						AudioInputStream pcmStream = AudioSystem.getAudioInputStream(tgtFormat, in);
-						Audio.CS klippi = new Audio.PCMClip(pcmStream, 2, 2);
-						((Audio.Mixer)Audio.player.stream).add(new Audio.VolAdjust(klippi, OptWnd.cleaveSoundVolumeSlider.val/50.0));
-					} catch(Exception e) {
-						e.printStackTrace();
-					}
-				} else if (OptWnd.opkSoundEnabledCheckbox.a &&res.basename().endsWith("oppknock")) {
-					try {
-						File file = new File("Alarms/" + OptWnd.opkSoundFilename.buf.line() + ".wav");
-						if(!file.exists()) {
-							return;
-						}
-						AudioInputStream in = AudioSystem.getAudioInputStream(file);
-						AudioFormat tgtFormat = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, 44100, 16, 2,4, 44100, false);
-						AudioInputStream pcmStream = AudioSystem.getAudioInputStream(tgtFormat, in);
-						Audio.CS klippi = new Audio.PCMClip(pcmStream, 2, 2);
-						((Audio.Mixer)Audio.player.stream).add(new Audio.VolAdjust(klippi, OptWnd.opkSoundVolumeSlider.val/50.0));
-					} catch(Exception e) {
-						e.printStackTrace();
-					}
-				}
-			} catch (Loading l) {
-			}
-		}
-	}
 }

@@ -43,7 +43,7 @@ public interface GLPanel extends UIPanel, UI.Context {
 	public final GLPanel p;
 	public final CPUProfile uprof = new CPUProfile(300), rprof = new CPUProfile(300);
 	public final GPUProfile gprof = new GPUProfile(300);
-	public static boolean bgmode = false;
+	protected boolean bgmode = false;
 	protected int fps, framelag;
 	protected volatile int frameno;
 	protected double uidle = 0.0, ridle = 0.0;
@@ -203,10 +203,12 @@ public interface GLPanel extends UIPanel, UI.Context {
 		    pos.x = 0;
 		if(pos.y < 0)
 		    pos.y = 0;
-		g.chcolor(255, 195, 0, 215); // ND: This is the tooltip border color
-		g.rect(pos.add(-3, -3), sz.add(6, 6));
+		Coord br = pos.add(sz);
+		Coord m = UI.scale(2, 2);
+		g.chcolor(244, 247, 21, 192);
+		g.rect2(pos.sub(m).sub(1, 1), br.add(m).add(1, 1));
 		g.chcolor(35, 35, 35, 192);
-		g.frect(pos.add(-2, -2), sz.add(4, 4));
+		g.frect2(pos.sub(m), br.add(m));
 		g.chcolor();
 		g.image(tex, pos);
 	    }
@@ -277,10 +279,7 @@ public interface GLPanel extends UIPanel, UI.Context {
 		FastText.aprintf(g, new Coord(10, y -= dy), 0, 1, "Mapview: %s", map.stats());
 		// FastText.aprintf(g, new Coord(10, y -= dy), 0, 1, "Click: Map: %s, Obj: %s", map.clmaplist.stats(), map.clobjlist.stats());
 	    }
-	    if(ui.sess != null)
-		FastText.aprintf(g, new Coord(10, y -= dy), 0, 1, "Async: L %s, D %s", ui.sess.glob.loader.stats(), Defer.gstats());
-	    else
-		FastText.aprintf(g, new Coord(10, y -= dy), 0, 1, "Async: D %s", Defer.gstats());
+	    FastText.aprintf(g, new Coord(10, y -= dy), 0, 1, "Async: L %s, D %s", ui.loader.stats(), Defer.gstats());
 	    int rqd = Resource.local().qdepth() + Resource.remote().qdepth();
 	    if(rqd > 0)
 		FastText.aprintf(g, new Coord(10, y -= dy), 0, 1, "RQ depth: %d (%d)", rqd, Resource.local().numloaded() + Resource.remote().numloaded());
@@ -291,7 +290,6 @@ public interface GLPanel extends UIPanel, UI.Context {
 	}
 
 	private StreamOut streamout = null;
-	public static boolean enableCornerFPSSetting = Utils.getprefb("CornerFPSSettingBool", true); // ND: Variable used for the interface menu to show the framerate
 
 	private void display(UI ui, GLRender buf) {
 	    Pipe wnd = p.basestate();
@@ -302,9 +300,6 @@ public interface GLPanel extends UIPanel, UI.Context {
 	    synchronized(ui) {
 		ui.draw(g);
 	    }
-		if (enableCornerFPSSetting) {
-			FastText.aprint(g, new Coord(g.sz().x - UI.scale(50), UI.scale(15)), 0, 1, "FPS: " + fps);
-		}
 	    if(dbtext.get())
 		drawstats(ui, g, buf);
 	    drawtooltip(ui, g);

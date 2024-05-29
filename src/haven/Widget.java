@@ -39,8 +39,8 @@ public class Widget {
     public Widget next, prev, child, lchild, parent;
     public int childseq;
     public boolean focustab = false, focusctl = false, hasfocus = false, visible = true;
-    public boolean attached = false;
-    private boolean canfocus = false, autofocus = false;
+    private boolean attached = false;
+    public boolean canfocus = false, autofocus = false;
     public boolean canactivate = false, cancancel = false;
     public Widget focused;
     public Indir<Resource> cursor = null;
@@ -49,7 +49,6 @@ public class Widget {
     public KeyBinding kb_gkey;
     private Widget prevtt;
     static Map<String, Factory> types = new TreeMap<String, Factory>();
-
 
     @dolda.jglob.Discoverable
     @Target(ElementType.TYPE)
@@ -158,29 +157,33 @@ public class Widget {
 	if(!inited) {
 	    for(Factory f : dolda.jglob.Loader.get(RName.class).instances(Factory.class)) {
 		synchronized(types) {
-		    types.put(f.getClass().getAnnotation(RName.class).value(), f);
+		    String nm = f.getClass().getAnnotation(RName.class).value();
+		    if(types.put(nm, f) != null)
+			Warning.warn("duplicated widget name: " + nm);
 		}
 	    }
 	    inited = true;
 	}
     }
 
-    public static Factory gettype2(String name) throws InterruptedException {
+    public static Factory gettype3(String name) {
 	if(name.indexOf('/') < 0) {
 	    synchronized(types) {
 		return(types.get(name));
 	    }
-	} else if (name.contains("ui/grainslot")) {
-		return new Grainslot.GrainSlotFactory();
 	} else {
 	    int ver = -1, p;
 	    if((p = name.indexOf(':')) > 0) {
 		ver = Integer.parseInt(name.substring(p + 1));
 		name = name.substring(0, p);
 	    }
-	    Indir<Resource> res = Resource.remote().load(name, ver, 10);
-	    return(Loading.waitforint(() -> res.get().getcode(Factory.class, true)));
+	    Indir<Resource> res = Resource.remote().load(name, ver);
+	    return(res.get().getcode(Factory.class, true));
 	}
+    }
+
+    public static Factory gettype2(String name) throws InterruptedException {
+	return(Loading.waitforint(() -> gettype3(name)));
     }
 
     public static Factory gettype(String name) {
@@ -406,7 +409,9 @@ public class Widget {
     }
 
     public void addchild(Widget child, Object... args) {
-	if(args[0] instanceof Coord) {
+	if((args.length > 0) && (args[0] == null)) {
+	    add(child);
+	} if(args[0] instanceof Coord) {
 	    Coord c = (Coord)args[0];
 	    String opt = (args.length > 1) ? (String)args[1] : "";
 	    if(opt.indexOf('u') < 0)
@@ -649,15 +654,15 @@ public class Widget {
 	
     public void uimsg(String msg, Object... args) {
 	if(msg == "tabfocus") {
-	    setfocustab(((Integer)args[0] != 0));
+	    setfocustab(Utils.bv(args[0]));
 	} else if(msg == "act") {
-	    canactivate = (Integer)args[0] != 0;
+	    canactivate = Utils.bv(args[0]);
 	} else if(msg == "cancel") {
-	    cancancel = (Integer)args[0] != 0;
+	    cancancel = Utils.bv(args[0]);
 	} else if(msg == "autofocus") {
-	    autofocus = (Integer)args[0] != 0;
+	    autofocus = Utils.bv(args[0]);
 	} else if(msg == "focus") {
-	    int tid = (Integer)args[0];
+	    int tid = Utils.iv(args[0]);
 	    if(tid < 0) {
 		setfocus(null);
 	    } else {
@@ -670,29 +675,29 @@ public class Widget {
 	} else if(msg == "pack") {
 	    pack();
 	} else if(msg == "z") {
-	    z((Integer)args[0]);
+	    z(Utils.iv(args[0]));
 	} else if(msg == "show") {
-	    show((Integer)args[0] != 0);
+	    show(Utils.bv(args[0]));
 	} else if(msg == "curs") {
 	    if(args.length == 0)
 		cursor = null;
 	    else
-		cursor = Resource.remote().load((String)args[0], (Integer)args[1]);
+		cursor = Resource.remote().load((String)args[0], Utils.iv(args[1]));
 	} else if(msg == "tip") {
 	    int a = 0;
 	    Object tt = args[a++];
 	    if(tt instanceof String) {
 		settip((String)tt);
 	    } else if(tt instanceof Integer) {
-		tooltip = new PaginaTip(ui.sess.getres((Integer)tt));
+		tooltip = new PaginaTip(ui.sess.getresv(tt));
 	    }
 	} else if(msg == "gk") {
 	    if(args[0] instanceof Integer) {
-		KeyMatch key = gkeymatch((Integer)args[0]);
+		KeyMatch key = gkeymatch(Utils.iv(args[0]));
 		if(args.length > 1) {
 		    int modign = 0;
 		    if(args.length > 2)
-			modign = (Integer)args[2];
+			modign = Utils.iv(args[2]);
 		    setgkey(KeyBinding.get("wgk/" + (String)args[1], key, modign));
 		} else {
 		    gkey = key;
@@ -765,7 +770,7 @@ public class Widget {
 
     public boolean mousedown(Coord c, int button) {
 	for(Widget wdg = lchild; wdg != null; wdg = wdg.prev) {
-	    if(!wdg.visible)
+	    if(!wdg.visible())
 		continue;
 	    Coord cc = xlate(wdg.c, true);
 	    if(c.isect(cc, wdg.sz)) {
@@ -779,7 +784,7 @@ public class Widget {
 	
     public boolean mouseup(Coord c, int button) {
 	for(Widget wdg = lchild; wdg != null; wdg = wdg.prev) {
-	    if(!wdg.visible)
+	    if(!wdg.visible())
 		continue;
 	    Coord cc = xlate(wdg.c, true);
 	    if(c.isect(cc, wdg.sz)) {
@@ -793,7 +798,7 @@ public class Widget {
 	
     public boolean mousewheel(Coord c, int amount) {
 	for(Widget wdg = lchild; wdg != null; wdg = wdg.prev) {
-	    if(!wdg.visible)
+	    if(!wdg.visible())
 		continue;
 	    Coord cc = xlate(wdg.c, true);
 	    if(c.isect(cc, wdg.sz)) {
@@ -807,7 +812,7 @@ public class Widget {
 	
     public void mousemove(Coord c) {
 	for(Widget wdg = lchild; wdg != null; wdg = wdg.prev) {
-	    if(!wdg.visible)
+	    if(!wdg.visible())
 		continue;
 	    Coord cc = xlate(wdg.c, true);
 	    wdg.mousemove(c.add(cc.inv()));
@@ -818,7 +823,7 @@ public class Widget {
 	boolean ret = false;
 	for(Widget wdg = lchild; wdg != null; wdg = wdg.prev) {
 	    boolean ch = hovering;
-	    if(!wdg.visible)
+	    if(!wdg.visible())
 		ch = false;
 	    Coord cc = xlate(wdg.c, true);
 	    boolean inside = c.isect(cc, wdg.sz);
@@ -924,7 +929,7 @@ public class Widget {
 	    }
 	} else {
 	    for(Widget wdg = child; wdg != null; wdg = wdg.next) {
-		if(wdg.visible) {
+		if(wdg.visible()) {
 		    if(wdg.keydown(ev))
 			return(true);
 		}
@@ -944,7 +949,7 @@ public class Widget {
 	    }
 	} else {
 	    for(Widget wdg = child; wdg != null; wdg = wdg.next) {
-		if(wdg.visible) {
+		if(wdg.visible()) {
 		    if(wdg.keyup(ev))	
 			return(true);
 		}
@@ -1079,6 +1084,13 @@ public class Widget {
 	    x += child.sz.x + pad;
 	}
 	return(Coord.of(x - pad, y + maxh));
+    }
+
+    public int addhlp(Coord c, int pad, int w, Widget... children) {
+	int cw = (w - ((children.length - 1) * pad)) / children.length;
+	for(Widget ch : children)
+	    ch.resizew(cw);
+	return(addhl(c, w, children));
     }
 
     public int addhl(Coord c, int w, Widget... children) {
@@ -1287,7 +1299,7 @@ public class Widget {
 	Resource ret;
 		
 	for(Widget wdg = lchild; wdg != null; wdg = wdg.prev) {
-	    if(!wdg.visible)
+	    if(!wdg.visible())
 		continue;
 	    Coord cc = xlate(wdg.c, true);
 	    if(c.isect(cc, wdg.sz)) {
@@ -1335,7 +1347,7 @@ public class Widget {
 			    else
 				text = title + "\n\n" + pag.text;
 			}
-			rend = RichText.render(text, 300).tex();
+			rend = RichText.render(text, UI.scale(300)).tex();
 		    } catch(Loading l) {
 			return(null);
 		    }
@@ -1375,18 +1387,18 @@ public class Widget {
 		    if(rich) {
 			tip = base;
 			if((key != null) && (key != KeyMatch.nil))
-			    tip = String.format("%s\n\nKeyboard shortcut: $col[255,200,0]{%s}", tip, RichText.Parser.quote(key.longname())); // ND: all 3 of these affect the keybind text color
+			    tip = String.format("%s\n\nKeyboard shortcut: $col[255,255,0]{%s}", tip, RichText.Parser.quote(key.name()));
 			w = UI.scale(300);
 		    } else {
 			tip = RichText.Parser.quote(base);
 			if((key != null) && (key != KeyMatch.nil))
-			    tip = String.format("%s ($col[255,200,0]{%s})", tip, RichText.Parser.quote(key.longname())); // ND: all 3 of these affect the keybind text color
+			    tip = String.format("%s ($col[255,255,0]{%s})", tip, RichText.Parser.quote(key.name()));
 		    }
 		} else {
 		    if((key == null) || (key == KeyMatch.nil))
 			tip = null;
 		    else
-			tip = String.format("Keyboard shortcut: $col[255,200,0]{%s}", RichText.Parser.quote(key.longname())); // ND: all 3 of these affect the keybind text color
+			tip = String.format("Keyboard shortcut: $col[255,255,0]{%s}", RichText.Parser.quote(key.name()));
 		}
 		rend = (tip == null) ? null : RichText.render(tip, w).tex();
 		hrend = true;
@@ -1404,7 +1416,7 @@ public class Widget {
 	    return(tooltip);
 	}
 	for(Widget wdg = lchild; wdg != null; wdg = wdg.prev) {
-	    if(!wdg.visible)
+	    if(!wdg.visible())
 		continue;
 	    Coord cc = xlate(wdg.c, true);
 	    if(c.isect(cc, wdg.sz)) {
@@ -1523,15 +1535,9 @@ public class Widget {
 	public abstract void ntick(double a);
     }
 
-	// ND: REPLACED BY ui.gui
-	// ND: This function gets the gameui. I got it from matias.
-//	public GameUI gameui() {
-//		Widget parent = this.parent;
-//		while (parent != null) {
-//			if (parent instanceof GameUI)
-//				return (GameUI) parent;
-//			parent = parent.parent;
-//		}
-//		return null;
-//	}
+    public static final OwnerContext.ClassResolver<Widget> wdgctx = new OwnerContext.ClassResolver<Widget>()
+	.add(Widget.class, wdg -> wdg)
+	.add(UI.class, wdg -> wdg.ui)
+	.add(Glob.class, wdg -> wdg.ui.sess.glob)
+	.add(Session.class, wdg -> wdg.ui.sess);
 }

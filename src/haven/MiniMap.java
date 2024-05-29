@@ -26,17 +26,17 @@
 
 package haven;
 
+import haven.render.*;
 import java.util.*;
 import java.util.function.*;
 import java.awt.Color;
 import haven.MapFile.Segment;
 import haven.MapFile.DataGrid;
+import haven.MapFile.Grid;
 import haven.MapFile.GridInfo;
 import haven.MapFile.Marker;
 import haven.MapFile.PMarker;
 import haven.MapFile.SMarker;
-import haven.map.MapSprite;
-
 import static haven.MCache.cmaps;
 import static haven.MCache.tilesz;
 import static haven.OCache.posres;
@@ -44,8 +44,7 @@ import static haven.OCache.posres;
 public class MiniMap extends Widget {
     public static final Tex bg = Resource.loadtex("gfx/hud/mmap/ptex");
     public static final Tex nomap = Resource.loadtex("gfx/hud/mmap/nomap");
-    public static final Tex plp = ((TexI)Resource.loadtex("gfx/hud/mmap/plp")).filter(haven.render.Texture.Filter.LINEAR);
-	private static final Color BIOME_BG = new Color(0, 0, 0, 110);
+    public static final Tex plp = ((TexI)Resource.loadtex("gfx/hud/mmap/plp")).filter(Texture.Filter.LINEAR);
     public final MapFile file;
     public Location curloc;
     public Location sessloc;
@@ -53,24 +52,12 @@ public class MiniMap extends Widget {
     public List<DisplayIcon> icons = Collections.emptyList();
     protected Locator setloc;
     protected boolean follow;
-    protected float zoomlevel = 1;
-	public float smallMapZoomLevel = 1;
-	public float bigMapZoomLevel = 1;
+    protected int zoomlevel = 0;
     protected DisplayGrid[] display;
-	public boolean compact;
     protected Area dgext, dtext;
     protected Segment dseg;
-	public float zoomMomentum = 0;
-	private boolean allowZooming = false;
-    public int dlvl;
+    protected int dlvl;
     protected Location dloc;
-	private String biome;
-	private Tex biometex;
-	private final Tex invalidMapWarningTex = Text.renderstroked("Warning: Map using workaround", Color.RED, Color.BLACK).tex();
-	public static boolean showMapViewRange = Utils.getprefb("showMapViewRange", true);
-	public static boolean showMapGridLines = Utils.getprefb("showMapGridLines", false);
-	public static boolean highlightMapTiles = Utils.getprefb("highlightMapTiles", false);
-	private final List<MapSprite> mapSprites = new LinkedList<>();
 
     public MiniMap(Coord sz, MapFile file) {
 	super(sz);
@@ -224,38 +211,8 @@ public class MiniMap extends Widget {
 	    } catch(Loading l) {
 	    }
 	}
-
 	icons = findicons(icons);
-
-	if (GLPanel.Loop.bgmode) {
-			zoomMomentum = 0.0f;
-	} else if (Math.abs(zoomMomentum) > 0.15) {
-		double delta = dt*zoomMomentum*(zoomlevel/6f);
-		int nextdlvl = Math.max(Integer.highestOneBit((int)(zoomlevel+delta)),1);
-		if (zoomMomentum > 0 && nextdlvl > dlvl && !allowzoomout()) {
-			//zoomlevel = zoomlevel*0.98f; // ND: I wonder why matias did it like this, I don't think this is necessary
-			zoomMomentum = 0;
-		} else {
-			zoomlevel += delta;
-			zoomMomentum *= 1-(5*dt);
-		}
-	}
-
-	if (zoomlevel <= 0.1f) { // ND: I had to change this from 0. I don't remember it bugging out in matias' client, but I could zoom in infinitely in mine, like it never reached 0, ever. 0.1 seems perfect
-		zoomlevel = 0.1f;
-		zoomMomentum = 0;
-	}
-	ticksprites(dt);
-	Coord mc = rootxlate(ui.mc);
-	if(mc.isect(Coord.z, sz)) {
-		setBiome(xlate(mc));
-	} else {
-		setBiome(null);
-	}
-	allowZooming = true;
     }
-
-
 
     public void center(Locator loc) {
 	setloc = loc;
@@ -267,27 +224,43 @@ public class MiniMap extends Widget {
 	follow = true;
     }
 
+    public static class Scale2D implements Pipe.Op {
+	public final Coord cc;
+	public final float f;
+
+	public Scale2D(Coord cc, float f) {
+	    this.cc = cc;
+	    this.f = f;
+	}
+
+	public void apply(Pipe buf) {
+	    Ortho2D st = (Ortho2D)buf.get(States.vxf);
+	    float w = st.r - st.l, h = st.b - st.u;
+	    buf.prep(new Ortho2D(cc.x + ((st.l - cc.x) / f), cc.y + ((st.u - cc.y) / f),
+				 cc.x + ((st.r - cc.x) / f), cc.y + ((st.b - cc.y) / f)));
+	}
+    }
+
     public static final Color notifcol = new Color(255, 128, 0, 255);
     public class DisplayIcon {
-	public final GobIcon icon;
+	public final GobIcon attr;
 	public final Gob gob;
-	public final GobIcon.Image img;
+	public final GobIcon.Icon icon;
 	public final GobIcon.Setting conf;
 	public Coord2d rc = null;
 	public Coord sc = null;
 	public double ang = 0.0;
-	public Color col = Color.WHITE;
 	public int z;
 	public double stime;
 	public boolean notify;
 	private Consumer<UI> snotify;
 	private boolean markchecked;
 
-	public DisplayIcon(GobIcon icon, GobIcon.Setting conf) {
-	    this.icon = icon;
-	    this.gob = icon.gob;
-	    this.img = icon.img();
-	    this.z = this.img.z;
+	public DisplayIcon(GobIcon attr, GobIcon.Setting conf) {
+	    this.attr = attr;
+	    this.gob = attr.gob;
+	    this.icon = attr.icon();
+	    this.z = icon.z();
 	    this.stime = Utils.rtime();
 	    this.conf = conf;
 	    if(this.notify = conf.notify)
@@ -300,22 +273,14 @@ public class MiniMap extends Widget {
 	}
 
 	public void dispupdate() {
-	    if((this.rc == null) || (sessloc == null) || (dloc == null) /*|| (dloc.seg != sessloc.seg)*/)
+	    if((this.rc == null) || (sessloc == null) || (dloc == null) || (dloc.seg != sessloc.seg))
 		this.sc = null;
 	    else
 		this.sc = p2c(this.rc);
 	}
 
-	public void draw(GOut g, DisplayIcon disp) {
-		Tex icontex = disp.gob != null && gob.getres() != null && !gob.getres().name.equals("gfx/borka/body") && disp.gob.knocked == Boolean.TRUE ? img.graytex : img.tex;
-	    if(col != null)
-		g.chcolor(col);
-	    else
-		g.chcolor();
-	    if(!img.rot)
-		g.image(icontex, sc.sub(img.cc));
-	    else
-		g.rotimage(icontex, sc, img.cc, -ang + img.ao);
+	public void draw(GOut g) {
+	    icon.draw(g, sc);
 	    if(notify) {
 		double t = (Utils.rtime() - stime) * 1.0;
 		if(t > 1) {
@@ -324,9 +289,9 @@ public class MiniMap extends Widget {
 		    double f = 1.0 + (Math.pow(Math.sin(t * Math.PI * 1.5), 2) * 1.0);
 		    double a = (t < 0.5) ? 0.5 : (0.5 - (t - 0.5));
 		    g.usestate(new ColorMask(notifcol));
+		    g.usestate(new Scale2D(sc.add(g.tx), (float)f));
 		    g.chcolor(255, 255, 255, (int)Math.round(255 * a));
-		    if(!img.rot)
-			g.image(icontex, sc.sub(img.cc.mul(f)), img.tex.sz().mul(f));
+		    icon.draw(g, sc);
 		    g.defstate();
 		}
 	    }
@@ -368,8 +333,6 @@ public class MiniMap extends Widget {
 	public static final Coord flagcc;
 	public final Marker m;
 	public final Text tip;
-
-	public static HashMap<String, Tex> titleTexMap = new HashMap<String, Tex>();
 	public Area hit;
 	private Resource.Image img;
 	private Coord imgsz;
@@ -385,8 +348,6 @@ public class MiniMap extends Widget {
 	public DisplayMarker(Marker marker) {
 	    this.m = marker;
 	    this.tip = Text.render(m.nm);
-		if (!titleTexMap.containsKey(tip.text))
-			titleTexMap.put(tip.text, Text.renderstroked(tip.text, Color.white, Color.BLACK, Text.num12boldFnd).tex());
 	    if(marker instanceof PMarker)
 		this.hit = Area.sized(flagcc.inv(), UI.scale(flagbg.sz));
 	}
@@ -402,7 +363,7 @@ public class MiniMap extends Widget {
 		SMarker sm = (SMarker)m;
 		try {
 		    if(cc == null) {
-			Resource res = sm.res.loadsaved(Resource.remote());
+			Resource res = sm.res.get();
 			img = res.flayer(Resource.imgc);
 			Resource.Neg neg = res.layer(Resource.negc);
 			cc = (neg != null) ? neg.cc : img.ssz.div(2);
@@ -449,10 +410,10 @@ public class MiniMap extends Widget {
 
 	    public Tex get() {
 		DataGrid grid = gref.get();
-		if(grid != cgrid || !valid()) {
+		if(grid != cgrid) {
 		    if(next != null)
 			next.cancel();
-		    next = getNext(grid);
+		    next = src.apply(grid);
 		    cgrid = grid;
 		}
 		if(next != null) {
@@ -462,29 +423,6 @@ public class MiniMap extends Widget {
 		}
 		return(img);
 	    }
-		protected Defer.Future<Tex> getNext(DataGrid grid) {
-			return src.apply(grid);
-		}
-
-		protected boolean valid() {return true;}
-	}
-
-	class CachedTileOverlay extends MiniMap.DisplayGrid.CachedImage {
-		private long seq = 0;
-		CachedTileOverlay(Function<MapFile.DataGrid, Defer.Future<Tex>> src) {
-			super(src);
-		}
-
-		@Override
-		protected boolean valid() {
-			return this.seq == TileHighlight.seq;
-		}
-
-		@Override
-		protected Defer.Future<Tex> getNext(DataGrid grid) {
-			this.seq = TileHighlight.seq;
-			return super.getNext(grid);
-		}
 	}
 
 	private CachedImage img_c;
@@ -515,7 +453,7 @@ public class MiniMap extends Widget {
 	    return(img_c.get());
 	}
 
-	private final Map<String, CachedImage> olimg_c = new HashMap<>();
+	private Map<String, CachedImage> olimg_c = new HashMap<>();
 	public Tex olimg(String tag) {
 	    CachedImage ret;
 	    synchronized(olimg_c) {
@@ -524,15 +462,6 @@ public class MiniMap extends Widget {
 	    }
 	    return(ret.get());
 	}
-
-		public Tex tileimg() {
-			CachedImage ret;
-			synchronized(olimg_c) {
-				if((ret = olimg_c.get(TileHighlight.TAG)) == null)
-					olimg_c.put(TileHighlight.TAG, ret = new CachedTileOverlay(grid -> Defer.later(() -> new TexI(TileHighlight.olrender(grid)))));
-			}
-			return(ret.get());
-		}
 
 	private Collection<DisplayMarker> markers = Collections.emptyList();
 	private int markerseq = -1;
@@ -557,88 +486,71 @@ public class MiniMap extends Widget {
 	}
     }
 
-	private float scalef() {
-		return(UI.unscale((zoomlevel)));
-	}
+    private float scalef() {
+	return(UI.unscale((float)(1 << dlvl)));
+    }
 
-	public Coord st2c(Coord tc) {
-		return(UI.scale(tc.add(sessloc.tc).sub(dloc.tc).div(zoomlevel)).add(sz.div(2)));
-	}
+    public Coord st2c(Coord tc) {
+	return(UI.scale(tc.add(sessloc.tc).sub(dloc.tc).div(1 << dlvl)).add(sz.div(2)));
+    }
 
     public Coord p2c(Coord2d pc) {
 	return(st2c(pc.floor(tilesz)));
     }
 
-	public int calcDrawLevel() {
-		return Math.max(Integer.highestOneBit((int)zoomlevel), 1);
-	}
-
-	private void redisplay(Location loc) {
-		Coord hsz = sz.div(2);
-		int safezoom = calcDrawLevel();
-		Coord zmaps = cmaps.mul(safezoom);
-		Area next = Area.sized(loc.tc.sub(hsz.mul(UI.unscale((safezoom)))).div(zmaps).sub(2, 2),
-				UI.unscale(sz).div(cmaps).add(6, 6));
-
-		if(((display == null) || (loc.seg != dseg) || (dlvl != calcDrawLevel()) || !next.equals(dgext))) {
-			DisplayGrid[] nd = new DisplayGrid[next.rsz()];
-			if((display != null) && (loc.seg == dseg) && (dlvl == calcDrawLevel())) {
-				for(Coord c : dgext) {
-					if(next.contains(c))
-						nd[next.ri(c)] = display[dgext.ri(c)];
-				}
-			}
-			display = nd;
-			dseg = loc.seg;
-			dlvl = calcDrawLevel();
-			dgext = next;
-			dtext = Area.sized(next.ul.mul(zmaps), next.sz().mul(zmaps));
-			zoomMomentum = 0;
-		}
-
-		dloc = loc;
-		if(file.lock.readLock().tryLock()) {
-			try {
-				//the level here specifies which sized saved maps we should load
-				// if you jerk off to bitwise operations like loftar you would probably not need to read that
-				// 31-NOLZ finds a dirty reverse power of 2, I.E turns 32 -> 5, 16 -> 4, 8 -> 3, 4 -> 2, 2 -> 1, 1 -> 0
-				int lvl = dlvl < 1f ? 0 : 31-Integer.numberOfLeadingZeros(dlvl);
-				for(Coord c : dgext) {
-					if(display[dgext.ri(c)] == null) {
-						display[dgext.ri(c)] = new DisplayGrid(dloc.seg, c, lvl, dloc.seg.grid(lvl, c.mul(dlvl)));
-					}
-
-				}
-
-			} finally {
-				file.lock.readLock().unlock();
-			}
-		}
-		for(DisplayIcon icon : icons)
-			icon.dispupdate();
-	}
-
-	public void drawgrid(GOut g, Coord ul, DisplayGrid disp) {
-		try {
-			Tex img = disp.img();
-			if(img != null) {
-				g.image(img, ul, UI.scale(img.sz().mul(dlvl).divUpFloor(zoomlevel)));
-			}
-		} catch(Loading l) {
-		}
-	}
-
-	public void drawmap(GOut g) {
-		Coord hsz = sz.div(2);
+    private void redisplay(Location loc) {
+	Coord hsz = sz.div(2);
+	Coord zmaps = cmaps.mul(1 << zoomlevel);
+	Area next = Area.sized(loc.tc.sub(hsz.mul(UI.unscale((float)(1 << zoomlevel)))).div(zmaps),
+	    UI.unscale(sz).div(cmaps).add(2, 2));
+	if((display == null) || (loc.seg != dseg) || (zoomlevel != dlvl) || !next.equals(dgext)) {
+	    DisplayGrid[] nd = new DisplayGrid[next.rsz()];
+	    if((display != null) && (loc.seg == dseg) && (zoomlevel == dlvl)) {
 		for(Coord c : dgext) {
-			Coord ul;
-			ul = UI.scale(c.mul(cmaps)).mul(dlvl).div(zoomlevel).sub(dloc.tc.div(scalef())).add(hsz);
-			DisplayGrid disp = display[dgext.ri(c)];
-			if(disp == null)
-				continue;
-			drawgrid(g, ul, disp);
+		    if(next.contains(c))
+			nd[next.ri(c)] = display[dgext.ri(c)];
 		}
+	    }
+	    display = nd;
+	    dseg = loc.seg;
+	    dlvl = zoomlevel;
+	    dgext = next;
+	    dtext = Area.sized(next.ul.mul(zmaps), next.sz().mul(zmaps));
 	}
+	dloc = loc;
+	if(file.lock.readLock().tryLock()) {
+	    try {
+		for(Coord c : dgext) {
+		    if(display[dgext.ri(c)] == null)
+			display[dgext.ri(c)] = new DisplayGrid(dloc.seg, c, dlvl, dloc.seg.grid(dlvl, c.mul(1 << dlvl)));
+		}
+	    } finally {
+		file.lock.readLock().unlock();
+	    }
+	}
+	for(DisplayIcon icon : icons)
+	    icon.dispupdate();
+    }
+
+    public void drawgrid(GOut g, Coord ul, DisplayGrid disp) {
+	try {
+	    Tex img = disp.img();
+	    if(img != null)
+		g.image(img, ul, UI.scale(img.sz()));
+	} catch(Loading l) {
+	}
+    }
+
+    public void drawmap(GOut g) {
+	Coord hsz = sz.div(2);
+	for(Coord c : dgext) {
+	    Coord ul = UI.scale(c.mul(cmaps)).sub(dloc.tc.div(scalef())).add(hsz);
+	    DisplayGrid disp = display[dgext.ri(c)];
+	    if(disp == null)
+		continue;
+	    drawgrid(g, ul, disp);
+	}
+    }
 
     public void drawmarkers(GOut g) {
 	Coord hsz = sz.div(2);
@@ -650,10 +562,6 @@ public class MiniMap extends Widget {
 		if(filter(mark))
 		    continue;
 		mark.draw(g, mark.m.tc.sub(dloc.tc).div(scalef()).add(hsz));
-		if (!compact) {
-			if (OptWnd.showMapMarkerNamesCheckBox.a)
-				g.image(DisplayMarker.titleTexMap.get(mark.tip.text), mark.m.tc.sub(dloc.tc).div(scalef()).add(hsz).add(-mark.tip.text.length()*3,-30));
-		}
 	    }
 	}
     }
@@ -661,11 +569,11 @@ public class MiniMap extends Widget {
     public List<DisplayIcon> findicons(Collection<? extends DisplayIcon> prev) {
 	if((ui.sess == null) || (iconconf == null))
 	    return(Collections.emptyList());
-	Map<Gob, DisplayIcon> pmap = Collections.emptyMap();
+	Map<GobIcon, DisplayIcon> pmap = Collections.emptyMap();
 	if(prev != null) {
 	    pmap = new HashMap<>();
 	    for(DisplayIcon disp : prev)
-		pmap.put(disp.gob, disp);
+		pmap.put(disp.attr, disp);
 	}
 	List<DisplayIcon> ret = new ArrayList<>();
 	OCache oc = ui.sess.glob.oc;
@@ -674,15 +582,12 @@ public class MiniMap extends Widget {
 		try {
 		    GobIcon icon = gob.getattr(GobIcon.class);
 		    if(icon != null) {
-			GobIcon.Setting conf = iconconf.get(icon.res.get());
+			GobIcon.Setting conf = iconconf.get(icon.icon());
 			if((conf != null) && conf.show) {
-			    DisplayIcon disp = pmap.remove(gob);
+			    DisplayIcon disp = pmap.remove(icon);
 			    if(disp == null)
 				disp = new DisplayIcon(icon, conf);
 			    disp.update(gob.rc, gob.a);
-			    KinInfo kin = gob.getattr(KinInfo.class);
-			    if((kin != null) && (kin.group < BuddyWnd.gc.length))
-				disp.col = BuddyWnd.gc[kin.group];
 			    ret.add(disp);
 			}
 		    }
@@ -700,12 +605,12 @@ public class MiniMap extends Widget {
     }
 
     public void drawicons(GOut g) {
-	if((sessloc == null) /*|| (dloc.seg != sessloc.seg)*/)
+	if((sessloc == null) || (dloc.seg != sessloc.seg))
 	    return;
 	for(DisplayIcon disp : icons) {
 	    if((disp.sc == null) || filter(disp))
 		continue;
-	    disp.draw(g, disp);
+	    disp.draw(g);
 	}
 	g.chcolor();
     }
@@ -727,50 +632,25 @@ public class MiniMap extends Widget {
 	}
     }
 
-	public void drawparty(GOut g) {
-		for (Party.Member m : ui.sess.glob.party.memb.values()) {
-			try {
-				Coord2d ppc = m.getc();
-				if (ppc == null)
-					continue;
-				Coord p2cppc = p2c(ppc);
-				g.chcolor(m.col.getRed(), m.col.getGreen(), m.col.getBlue(), 255);
-				g.rotimage(plp, p2c(ppc), plp.sz().div(2), -m.geta() - (Math.PI / 2));
-				g.chcolor();
-
-				if (!compact) {
-					String name;
-					if (GameUI.gobIdToKinName.containsKey(m.gobid)) {
-						name = GameUI.gobIdToKinName.get(m.gobid);
-						g.image(Text.renderstroked(name, Color.white, Color.BLACK, Text.num12boldFnd).tex(),p2cppc.add(-name.length()*4,-30));
-					} else if (m.getgob() != null) {
-						KinInfo kinInfo = m.getgob().getattr(KinInfo.class);
-						if (kinInfo != null) {
-							name = kinInfo.name;
-							if (!GameUI.gobIdToKinName.containsKey(m.gobid)) {
-								GameUI.gobIdToKinName.put(m.gobid, name);
-							}
-						}
-					}
-				}
-			} catch (Loading l) {
-			}
-		}
+    public void drawparty(GOut g) {
+	for(Party.Member m : ui.sess.glob.party.memb.values()) {
+	    try {
+		Coord2d ppc = m.getc();
+		if(ppc == null)
+		    continue;
+		g.chcolor(m.col.getRed(), m.col.getGreen(), m.col.getBlue(), 255);
+		g.rotimage(plp, p2c(ppc), plp.sz().div(2), -m.geta() - (Math.PI / 2));
+		g.chcolor();
+	    } catch(Loading l) {}
 	}
+    }
 
     public void drawparts(GOut g){
 	drawmap(g);
 	drawmarkers(g);
-	drawmovequeue(g);
-	if(showMapViewRange) {drawview(g);}
-	if(showMapGridLines && dlvl <= 6) {drawgridlines(g);}
-	if(dlvl <= 3) {
-		drawicons(g);
-	}
+	if(dlvl == 0)
+	    drawicons(g);
 	drawparty(g);
-	drawbiome(g);
-	drawsprites(g);
-	drawInvalidWarning(g);
     }
 
     public void draw(GOut g) {
@@ -780,7 +660,6 @@ public class MiniMap extends Widget {
 	redisplay(loc);
 	remparty();
 	drawparts(g);
-
     }
 
     private static boolean hascomplete(DisplayGrid[] disp, Area dext, Coord c) {
@@ -815,8 +694,7 @@ public class MiniMap extends Widget {
     public DisplayIcon iconat(Coord c) {
 	for(ListIterator<DisplayIcon> it = icons.listIterator(icons.size()); it.hasPrevious();) {
 	    DisplayIcon disp = it.previous();
-	    GobIcon.Image img = disp.img;
-	    if((disp.sc != null) && c.isect(disp.sc.sub(img.cc), img.tex.sz()) && !filter(disp))
+	    if((disp.sc != null) && disp.icon.checkhit(c.sub(disp.sc)) && !filter(disp))
 		return(disp);
 	}
 	return(null);
@@ -851,8 +729,8 @@ public class MiniMap extends Widget {
 	    try {
 		if(icon.markchecked)
 		    continue;
-		GobIcon.Image img = icon.icon.img();
-		if(!icon.conf.getmarkablep()) {
+		GobIcon.Icon micon = icon.icon;
+		if(!icon.conf.getmarkablep() || !(micon instanceof GobIcon.ImageIcon)) {
 		    icon.markchecked = true;
 		    continue;
 		}
@@ -866,11 +744,11 @@ public class MiniMap extends Widget {
 		    if(info == null)
 			continue;
 		    Coord sc = tc.add(info.sc.sub(obg.gc).mul(cmaps));
-		    SMarker prev = file.smarker(img.res.name, info.seg, sc);
+		    SMarker prev = file.smarker(micon.res.name, info.seg, sc);
 		    if(prev == null) {
 			if(icon.conf.getmarkp()) {
-			    Resource.Tooltip tt = img.res.flayer(Resource.tooltip);
-			    mid = new SMarker(info.seg, sc, tt.t, 0, new Resource.Spec(Resource.remote(), img.res.name, img.res.ver));
+			    Resource.Tooltip tt = micon.res.flayer(Resource.tooltip);
+			    mid = new SMarker(info.seg, sc, tt.t, 0, new Resource.Saved(Resource.remote(), micon.res.name, micon.res.ver));
 			    file.add(mid);
 			} else {
 			    mid = null;
@@ -989,10 +867,12 @@ public class MiniMap extends Widget {
     }
 
     public boolean mousewheel(Coord c, int amount) {
-		if (allowZooming){
-			zoomMomentum += 1.5*Math.signum(amount);
-			allowZooming = false;
-		}
+	if(amount > 0) {
+	    if(allowzoomout())
+		zoomlevel = Math.min(zoomlevel + 1, dlvl + 1);
+	} else {
+	    zoomlevel = Math.max(zoomlevel - 1, 0);
+	}
 	return(true);
     }
 
@@ -1010,306 +890,17 @@ public class MiniMap extends Widget {
     public void mvclick(MapView mv, Coord mc, Location loc, Gob gob, int button) {
 	if(mc == null) mc = ui.mc;
 	if((sessloc != null) && (sessloc.seg == loc.seg)) {
-		GameUI gui = ui.gui;
-		if (gob == null) {
-			if(ui.modmeta){
-				if(button == 1){
-					mv.addCheckpoint(loc.tc.sub(sessloc.tc).mul(tilesz).add(tilesz.div(2)));
-				} else if(button == 3){
-					Gob player = gui.map.player();
-					if (player != null && player.rc != null) {
-						Map<String, ChatUI.MultiChat> chats = gui.chat.getMultiChannels();
-						Coord2d clickloc = loc.tc.sub(sessloc.tc).mul(tilesz).add(tilesz.div(2));
-						ChatUI.MultiChat chat = chats.get("Party");
-						if (chat != null) {
-							chat.send("LOC@" + (int)(clickloc.x-player.rc.x) + "x" + (int)(clickloc.y-player.rc.y));
-						}
-					}
-				}
-			}
-			if (OptWnd.autoswitchBunnyPlateBootsCheckBox.a) {
-				try {
-					if (gui.getequipory() != null && gui.getequipory().slots != null) {
-						WItem eqboots = gui.getequipory().slots[Equipory.SLOTS.BOOTS.idx];
-						if (eqboots != null && eqboots.item.getname().equals("Bunny Slippers")) {
-							List<WItem> invboots = gui.maininv.getItemsExact("Plate Boots");
-							if (invboots.size() > 0) {
-								eqboots.item.wdgmsg("transfer", new Coord(eqboots.sz.x / 2, eqboots.sz.y / 2));
-								WItem boots = invboots.get(0);
-								boots.item.wdgmsg("transfer", new Coord(boots.sz.x / 2, boots.sz.y / 2));
-							}
-						}
-					}
-				} catch (Exception e) {}
-			}
-			if(mv.checkpointManager != null && mv.checkpointManagerThread != null && button == 1){
-				if (!ui.modmeta)
-					mv.checkpointManager.pauseIt();
-			}
-			mv.wdgmsg("click", mc, loc.tc.sub(sessloc.tc).mul(tilesz).add(tilesz.div(2)).floor(posres), button, ui.modflags());
-		} else {
-			if (OptWnd.autoswitchBunnyPlateBootsCheckBox.a) {
-				try {
-					WItem eqboots = gui.getequipory().slots[Equipory.SLOTS.BOOTS.idx];
-					List<WItem> invboots;
-					if (gob.getres().name.contains("/rabbit/")) {
-						invboots = gui.maininv.getItemsExact("Bunny Slippers");
-						if (invboots.size() > 0) {
-							if (eqboots != null && !eqboots.item.getname().equals("Bunny Slippers")) {
-								eqboots.item.wdgmsg("transfer", new Coord(eqboots.sz.x / 2, eqboots.sz.y / 2));
-							}
-							WItem slipper = invboots.get(0);
-							slipper.item.wdgmsg("transfer", new Coord(slipper.sz.x / 2, slipper.sz.y / 2));
-						}
-					} else {
-						invboots = gui.maininv.getItemsExact("Plate Boots");
-						if (eqboots != null && eqboots.item.getname().equals("Bunny Slippers")) {
-							if (invboots.size() > 0) {
-								eqboots.item.wdgmsg("transfer", new Coord(eqboots.sz.x / 2, eqboots.sz.y / 2));
-								WItem boots = invboots.get(0);
-								boots.item.wdgmsg("transfer", new Coord(boots.sz.x / 2, boots.sz.y / 2));
-							}
-						}
-					}
-				} catch (Exception ignored) {
-			}
-		}
-			Object[] args = {mc, loc.tc.sub(sessloc.tc).mul(tilesz).add(tilesz.div(2)).floor(posres), button, ui.modflags(), 0, (int) gob.id, gob.rc.floor(posres), 0, -1};
-			if (button == 3 && OptWnd.instantFlowerMenuCTRLCheckBox.a) {
-				mv.wdgmsg("click", args);
-				if (ui.modctrl) {
-					ui.gui.ui.rcvr.rcvmsg(ui.gui.ui.lastid+1, "cl", 0, ui.gui.ui.modflags());
-				}
-				return;
-			}
-			mv.wdgmsg("click", args);
-		}
+	    if(gob == null)
+		mv.wdgmsg("click", mc,
+			  loc.tc.sub(sessloc.tc).mul(tilesz).add(tilesz.div(2)).floor(posres),
+			  button, ui.modflags());
+	    else
+		mv.wdgmsg("click", mc,
+			  loc.tc.sub(sessloc.tc).mul(tilesz).add(tilesz.div(2)).floor(posres),
+			  button, ui.modflags(), 0,
+			  (int)gob.id,
+			  gob.rc.floor(posres),
+			  0, -1);
 	}
     }
-
-	void drawbiome(GOut g) {
-		if(biometex != null) {
-			Coord mid = new Coord(g.sz().x / 2, 0);
-			Coord tsz = biometex.sz();
-			g.chcolor(BIOME_BG);
-			g.frect(mid.sub(2 + tsz.x /2, 0), tsz.add(4, 2));
-			g.chcolor();
-			g.aimage(biometex, mid, 0.5f, 0);
-		}
-	}
-
-	void drawInvalidWarning(GOut g) {
-		if (dloc.seg != sessloc.seg){
-			if (invalidMapWarningTex != null) {
-				Coord tsz = invalidMapWarningTex.sz();
-				Coord mid = new Coord(g.sz().x / 2, UI.scale(16));
-				g.chcolor(BIOME_BG);
-				g.frect(mid.sub(2 + tsz.x /2, 0), tsz.add(4, 2));
-				g.chcolor();
-				g.aimage(invalidMapWarningTex, mid, 0.5f, 0);
-			}
-
-		}
-	}
-
-	private void setBiome(Location loc) {
-		try {
-			Resource res = null;
-			String newbiome = biome;
-			if(loc == null) {
-				Gob player = ui.gui.map.player();
-				MCache mCache = ui.sess.glob.map;
-				if (player != null) { // ND: Do this to avoid Nullpointer crash when switching maps? (Like going from character creation zone to valhalla or the real world)
-					int tile = mCache.gettile(player.rc.div(tilesz).floor());
-					res = mCache.tilesetr(tile);
-				}
-				if(res != null) {
-					newbiome = res.name;
-				}
-			} else {
-				MapFile map = loc.seg.file();
-				if(map.lock.readLock().tryLock()) {
-					try {
-						MapFile.Grid grid = loc.seg.grid(loc.tc.div(cmaps)).get();
-						if(grid != null) {
-							int tile = grid.gettile(loc.tc.mod(cmaps));
-							newbiome = grid.tilesets[tile].res.name;
-						}
-					} finally {
-						map.lock.readLock().unlock();
-					}
-				}
-			}
-			if(newbiome != null && !newbiome.equals(biome)) {
-				biome = newbiome;
-				biometex = Text.renderstroked(prettybiome(biome)).tex();
-			}
-		} catch (Loading ignored) {}
-	}
-
-	private static final Map<String, String> improvedTileNames = new HashMap<String, String>(){{
-		put("Water", "Shallow Water");
-		put("Deep", "Deep Water");
-		put("Owater", "Shallow Ocean");
-		put("Odeep", "Deep Ocean");
-		put("Odeeper", "Very Deep Ocean");
-	}};
-	private static String prettybiome(String biome) {
-		int k = biome.lastIndexOf("/");
-		biome = biome.substring(k + 1);
-		biome = biome.substring(0, 1).toUpperCase() + biome.substring(1);
-		if(improvedTileNames.containsKey(biome)) {
-			return improvedTileNames.get(biome);
-		}
-		return biome;
-	}
-
-	public static final Coord VIEW_SZ = UI.scale(MCache.sgridsz.mul(9).div(tilesz.floor()));// view radius is 9x9 "server" grids
-	public static final Color VIEW_BG_COLOR = new Color(255, 255, 255, 60);
-	public static final Color VIEW_BORDER_COLOR = new Color(0, 0, 0, 128);
-	void drawview(GOut g) {
-		Coord2d sgridsz = new Coord2d(MCache.sgridsz);
-		Gob player = ui.gui.map.player();
-		if(player != null) {
-			Coord rc = p2c(player.rc.floor(sgridsz).sub(4, 4).mul(sgridsz));
-			Coord viewsz = VIEW_SZ.div(zoomlevel);
-			g.chcolor(VIEW_BG_COLOR);
-			g.frect(rc, viewsz);
-			if (zoomlevel >= 0.4 && follow) {
-				g.chcolor(VIEW_BORDER_COLOR);
-				g.rect(rc, viewsz);
-			}
-			g.chcolor();
-		}
-	}
-
-	private static final Color gridColor = new Color(180, 0, 0);
-	void drawgridlines(GOut g) {
-		Coord2d zmaps = new Coord2d(cmaps).div(scalef());
-		Coord2d offset = new Coord2d(sz.div(2)).sub(new Coord2d(dloc.tc).div(scalef())).mod(zmaps);
-		double width = UI.scale(2f/zoomlevel);
-		double width2 = UI.scale((2f/zoomlevel) + 2f);
-		Color col = g.getcolor();
-		Coord gridlines = sz.div(zmaps);
-		Coord2d ulgrid = dgext.ul.mul(zmaps).mod(zmaps);
-		g.chcolor(Color.BLACK);
-		for (int x = -1; x < gridlines.x+1; x++) {
-			Coord up = new Coord2d((zmaps.x*x+ulgrid.x+offset.x), 0).floor();
-			Coord dn = new Coord2d((zmaps.x*x+ulgrid.x+offset.x), sz.y).floor();
-			if(up.x >= 0 && up.x <= sz.x) {
-				g.line(up, dn, width2);
-			}
-		}
-		for (int y = -1; y < gridlines.y+1; y++) {
-			Coord le = new Coord2d(0, (zmaps.y*y+ulgrid.y+offset.y)).floor();
-			Coord ri = new Coord2d(sz.x, (zmaps.y*y+ulgrid.y+offset.y)).floor();
-			if(le.y >= 0 && le.y <= sz.y) {
-				g.line(le, ri, width2);
-			}
-		}
-		g.chcolor(gridColor);
-		for (int x = -1; x < gridlines.x+1; x++) {
-			Coord up = new Coord2d((zmaps.x*x+ulgrid.x+offset.x), 0).floor();
-			Coord dn = new Coord2d((zmaps.x*x+ulgrid.x+offset.x), sz.y).floor();
-			if(up.x >= 0 && up.x <= sz.x) {
-				g.line(up, dn, width);
-			}
-		}
-		for (int y = -1; y < gridlines.y+1; y++) {
-			Coord le = new Coord2d(0, (zmaps.y*y+ulgrid.y+offset.y)).floor();
-			Coord ri = new Coord2d(sz.x, (zmaps.y*y+ulgrid.y+offset.y)).floor();
-			if(le.y >= 0 && le.y <= sz.y) {
-				g.line(le, ri, width);
-			}
-		}
-		g.chcolor(col);
-	}
-
-	private void drawmovequeue(GOut g) {
-		MapView mv = ui.gui.map;
-		if (mv == null){
-			return;
-		}
-		if (mv.checkpointManager != null && mv.checkpointManagerThread != null) {
-			if(mv.checkpointManager.checkpointList.listitems() > 0){
-				List<Coord2d> coords = mv.getCheckPointList();
-				Gob player = mv.player();
-				if (player == null) return;
-				final Coord2d movingto = coords.get(0);
-				final Iterator<Coord2d> queue = coords.iterator();
-				Coord last;
-				if (movingto != null && player.rc != null) {
-					//Make the line first
-					g.chcolor(Color.WHITE);
-					Coord cloc = p2c(player.rc);
-					last = p2c(mv.getCheckPointList().get(0));
-					if (last != null && cloc != null) {
-						g.dottedline(cloc, last, 2);
-						if (queue.hasNext()) {
-							while (queue.hasNext()) {
-								final Coord next = p2c(queue.next());
-								if (next != null) {
-									g.dottedline(last, next, 2);
-									last = next;
-								} else {
-									break;
-								}
-							}
-						}
-					}
-				} else if (mv.player().rc != null && player.rc != null) {
-					Coord cloc = p2c(player.rc);
-					last = p2c(mv.player().rc);
-					if (last != null && cloc != null) {
-						g.dottedline(cloc, last, 1);
-					}
-				}
-			}
-		}
-	}
-
-	private void drawsprites(GOut g) {
-
-		synchronized (mapSprites) {
-			for (MapSprite mapSprite : mapSprites) {
-				mapSprite.draw(g, p2c(mapSprite.rc), zoomlevel);
-			}
-		}
-	}
-
-	private void ticksprites(double dt) {
-		synchronized (mapSprites) {
-			ListIterator<MapSprite> iter = mapSprites.listIterator();
-			while (iter.hasNext()) {
-				MapSprite mapSprite = iter.next();
-				boolean done = mapSprite.tick(dt);
-				if (done) {
-					iter.remove();
-				}
-			}
-		}
-	}
-
-	public void addSprite(MapSprite mapSprite) {
-		synchronized (mapSprites) {
-			mapSprites.add(mapSprite);
-		}
-	}
-
-	enum Symbols {
-		$circle("gfx/hud/mmap/symbols/circle"),
-		$diamond("gfx/hud/mmap/symbols/diamond"),
-		$dot("gfx/hud/mmap/symbols/dot"),
-		$down("gfx/hud/mmap/symbols/down"),
-		$pentagon("gfx/hud/mmap/symbols/pentagon"),
-		$square("gfx/hud/mmap/symbols/square"),
-		$up("gfx/hud/mmap/symbols/up");
-
-		public final Tex tex;
-		public static final Symbols DEFAULT = $circle;
-
-		Symbols(String res) {
-			tex = Resource.loadtex(res);
-		}
-	}
 }

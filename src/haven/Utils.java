@@ -29,22 +29,17 @@ package haven;
 import java.awt.RenderingHints;
 import java.io.*;
 import java.nio.*;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.net.*;
 import java.lang.ref.*;
 import java.lang.reflect.*;
-import java.text.SimpleDateFormat;
 import java.util.prefs.*;
+import java.security.*;
 import java.util.*;
 import java.util.function.*;
 import java.awt.Graphics;
 import java.awt.Color;
 import java.awt.image.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import org.json.JSONArray;
 
 public class Utils {
     public static final java.nio.charset.Charset utf8 = java.nio.charset.Charset.forName("UTF-8");
@@ -74,21 +69,6 @@ public class Utils {
 		    return(null);
 		}
 	    });
-    }
-
-    static void drawgay(BufferedImage t, BufferedImage img, Coord c) {
-	Coord sz = imgsz(img);
-	for(int y = 0; y < sz.y; y++) {
-	    for(int x = 0; x < sz.x; x++) {
-		int p = img.getRGB(x, y);
-		if(Utils.rgbm.getAlpha(p) > 128) {
-		    if((p & 0x00ffffff) == 0x00ff0080)
-			t.setRGB(x + c.x, y + c.y, 0);
-		    else
-			t.setRGB(x + c.x, y + c.y, p);
-		}
-	    }
-	}
     }
 
     public static URI uri(String uri) {
@@ -282,7 +262,7 @@ public class Utils {
 	}
     }
 
-    public static final Config.Variable<String> prefspec = Config.Variable.prop("haven.prefspec", "hafen-Nightdawg");
+    public static final Config.Variable<String> prefspec = Config.Variable.prop("haven.prefspec", "hafen");
     public static Preferences prefs() {
 	if(prefs == null) {
 	    synchronized(Utils.class) {
@@ -319,38 +299,6 @@ public class Utils {
 	} catch(SecurityException e) {
 	}
     }
-
-	static String[] getprefsa(String prefname, String[] def) {
-		try {
-			String jsonstr = Utils.getpref(prefname, null);
-			if (jsonstr == null)
-				return def;
-			JSONArray ja = new JSONArray(jsonstr);
-			String[] ra = new String[ja.length()];
-			for (int i = 0; i < ja.length(); i++)
-				ra[i] = ja.getString(i);
-			return ra;
-		} catch (SecurityException e) {
-			return def;
-		} catch (Exception ex) {
-			ex.printStackTrace();
-			return def;
-		}
-	}
-
-	static void setprefsa(String prefname, String[] val) {
-		try {
-			String jsonarr = "";
-			for (String s : val)
-				jsonarr += "\"" + s + "\",";
-			if (jsonarr.length() > 0)
-				jsonarr = jsonarr.substring(0, jsonarr.length() - 1);
-			Utils.setpref(prefname, "[" + jsonarr + "]");
-		} catch (SecurityException e) {
-		} catch (Exception ex) {
-			ex.printStackTrace();
-		}
-	}
 
     public static int getprefi(String prefname, int def) {
 	try {
@@ -480,6 +428,10 @@ public class Utils {
 
     public static int iv(Object arg) {
 	return(((Number)arg).intValue());
+    }
+
+    public static long uiv(Object arg) {
+	return(uint32(iv(arg)));
     }
 
     public static float fv(Object arg) {
@@ -935,9 +887,8 @@ public class Utils {
 		try {
 		    return(task.run());
 		} catch(RuntimeException | IOException exc) {
-			// ND: Commented below 2 lines cause I don't need to see the map file reading error message/stack trace
-//		    if(last == null)
-//			new Warning(exc, "weird I/O error occurred on " + String.valueOf(task)).issue();
+		    if(last == null)
+			new Warning(exc, "weird I/O error occurred on " + String.valueOf(task)).issue();
 		    if(last != null)
 			exc.addSuppressed(last);
 		    last = exc;
@@ -1165,53 +1116,39 @@ public class Utils {
                          ((col & 0x000f) >>  0) * 17));
     }
 
-	public static BufferedImage outline(BufferedImage img, Color col) {
-		return outline(img, col, false);
-	}
-
-	public static BufferedImage outline(BufferedImage img, Color col, boolean thick) {
-		Coord sz = imgsz(img).add(2, 2);
-		BufferedImage ol = TexI.mkbuf(sz);
-		Object fcol = ol.getColorModel().getDataElements(col.getRGB(), null);
-		Raster src = img.getRaster();
-		WritableRaster dst = ol.getRaster();
-		for(int y = 0; y < sz.y; y++) {
-			for(int x = 0; x < sz.x; x++) {
-				boolean t;
-				if((y == 0) || (x == 0) || (y == sz.y - 1) || (x == sz.x - 1)) {
-					t = true;
-				} else {
-					t = src.getSample(x - 1, y - 1, 3) < 250;
-				}
-				if(!t)
-					continue;
-				if(((x > 1) && (y > 0) && (y < sz.y - 1) && (src.getSample(x - 2, y - 1, 3) >= 250)) ||
-						((x > 0) && (y > 1) && (x < sz.x - 1) && (src.getSample(x - 1, y - 2, 3) >= 250)) ||
-						((x < sz.x - 2) && (y > 0) && (y < sz.y - 1) && (src.getSample(x, y - 1, 3) >= 250)) ||
-						((x > 0) && (y < sz.y - 2) && (x < sz.x - 1) && (src.getSample(x - 1, y, 3) >= 250)))
-					dst.setDataElements(x, y, fcol);
-				if(thick) {
-					if(((x > 1) && (y > 1) && (src.getSample(x - 2, y - 2, 3)) >= 250) ||
-							((x < sz.x - 2) && (y < sz.y - 2) && (src.getSample(x, y, 3) >= 250)) ||
-							((x < sz.x - 2) && (y > 1) && (src.getSample(x, y - 2, 3) >= 250)) ||
-							((x > 1) && (y < sz.y - 2) && (src.getSample(x - 2, y, 3) >= 250)))
-						dst.setDataElements(x, y, fcol);
-				}
-			}
+    public static BufferedImage outline(BufferedImage img, Color col) {
+	Coord sz = imgsz(img).add(2, 2);
+	BufferedImage ol = TexI.mkbuf(sz);
+	Object fcol = ol.getColorModel().getDataElements(col.getRGB(), null);
+	Raster src = img.getRaster();
+	WritableRaster dst = ol.getRaster();
+	for(int y = 0; y < sz.y; y++) {
+	    for(int x = 0; x < sz.x; x++) {
+		boolean t;
+		if((y == 0) || (x == 0) || (y == sz.y - 1) || (x == sz.x - 1)) {
+		    t = true;
+		} else {
+		    t = src.getSample(x - 1, y - 1, 3) < 250;
 		}
-		return(ol);
+		if(!t)
+		    continue;
+		if(((x > 1) && (y > 0) && (y < sz.y - 1) && (src.getSample(x - 2, y - 1, 3) >= 250)) ||
+		   ((x > 0) && (y > 1) && (x < sz.x - 1) && (src.getSample(x - 1, y - 2, 3) >= 250)) ||
+		   ((x < sz.x - 2) && (y > 0) && (y < sz.y - 1) && (src.getSample(x, y - 1, 3) >= 250)) ||
+		   ((x > 0) && (y < sz.y - 2) && (x < sz.x - 1) && (src.getSample(x - 1, y, 3) >= 250)))
+		    dst.setDataElements(x, y, fcol);
+	    }
 	}
-	public static BufferedImage outline2(BufferedImage img, Color col) {
-		return outline2(img, col, false);
-	}
+	return(ol);
+    }
 
-	public static BufferedImage outline2(BufferedImage img, Color col, boolean thick) {
-		BufferedImage ol = outline(img, col, thick);
-		Graphics g = ol.getGraphics();
-		g.drawImage(img, 1, 1, null);
-		g.dispose();
-		return(ol);
-	}
+    public static BufferedImage outline2(BufferedImage img, Color col) {
+	BufferedImage ol = outline(img, col);
+	Graphics g = ol.getGraphics();
+	g.drawImage(img, 1, 1, null);
+	g.dispose();
+	return(ol);
+    }
 
     public static int floordiv(int a, int b) {
 	if(a < 0)
@@ -1332,6 +1269,10 @@ public class Utils {
 	return(a);
     }
 
+    public static float smoothstep(float d) {
+	return(d * d * (3 - (2 * d)));
+    }
+
     public static double smoothstep(double d) {
 	return(d * d * (3 - (2 * d)));
     }
@@ -1346,7 +1287,6 @@ public class Utils {
     }
 
     public static Color blendcol(Color x, Color y, double a) {
-		a = clip(a, 0, 1); //ND: Add this for the camera night mode.
 	int f1 = (int)(a * 255), f2 = 255 - f1;
 	return(new Color(((x.getRed()   * f2) + (y.getRed()   * f1)) / 255,
 			 ((x.getGreen() * f2) + (y.getGreen() * f1)) / 255,
@@ -1354,23 +1294,9 @@ public class Utils {
 			 ((x.getAlpha() * f2) + (y.getAlpha() * f1)) / 255));
     }
 
-    public static Color blendcol(double a, Color... cols) {
-        a = clip(a, 0, 1);
-        if(cols.length > 2) {
-            int n = cols.length - 1;
-            double d = 1.0 / n;
-            int section = (int) (a / d);
-            if(section >= n){
-                return cols[n];
-            } else {
-                return blendcol(cols[section], cols[section + 1], (a - section * d) / d);
-            }
-        } else if(cols.length == 2) {
-            return blendcol(cols[0], cols[1], a);
-        } else if(cols.length == 1) {
-            return cols[0];
-        }
-        return null;
+    public static Color colmul(Color a, Color b) {
+	return(new Color((a.getRed()  * b.getRed() ) / 255, (a.getGreen() * b.getGreen()) / 255,
+			 (a.getBlue() * b.getBlue()) / 255, (a.getAlpha() * b.getAlpha()) / 255));
     }
 
     public static Color preblend(Color c1, Color c2) {
@@ -1867,7 +1793,7 @@ public class Utils {
 	}
     }
 
-    public static class Range extends AbstractCollection<Integer> {
+    public static class Range extends AbstractList<Integer> {
 	public final int min, max, step;
 
 	public Range(int min, int max, int step) {
@@ -1880,28 +1806,17 @@ public class Utils {
 	    return(Math.max((max - min + step - 1) / step, 0));
 	}
 
-	public Iterator<Integer> iterator() {
-	    return(new Iterator<Integer>() {
-		    private int cur = min;
-
-		    public boolean hasNext() {
-			return((step > 0) ? (cur < max) : (cur > max));
-		    }
-
-		    public Integer next() {
-			if(!hasNext())
-			    throw(new NoSuchElementException());
-			int ret = cur;
-			cur += step;
-			return(ret);
-		    }
-		});
+	public Integer get(int idx) {
+	    int rv = min + (step * idx);
+	    if((rv < min) || (rv >= max))
+		throw(new NoSuchElementException());
+	    return(rv);
 	}
     }
 
-    public static Collection<Integer> range(int min, int max, int step) {return(new Range(min, max, step));}
-    public static Collection<Integer> range(int min, int max) {return(range(min, max, 1));}
-    public static Collection<Integer> range(int max) {return(range(0, max));}
+    public static List<Integer> range(int min, int max, int step) {return(new Range(min, max, step));}
+    public static List<Integer> range(int min, int max) {return(range(min, max, 1));}
+    public static List<Integer> range(int max) {return(range(0, max));}
 
     public static <T> Indir<T> cache(Indir<T> src) {
 	return(new Indir<T>() {
@@ -1914,6 +1829,23 @@ public class Utils {
 			has = true;
 		    }
 		    return(val);
+		}
+	    });
+    }
+
+    public static <V, R> Indir<R> transform(Supplier<? extends V> val, Function<? super V, ? extends R> xf) {
+	return(new Indir<R>() {
+		private V last;
+		private R res;
+		private boolean has = false;
+
+		public R get() {
+		    V v = val.get();
+		    if(!has || !Utils.eq(last, v)) {
+			res = xf.apply(v);
+			last = v;
+		    }
+		    return(res);
 		}
 	    });
     }
@@ -2233,6 +2165,33 @@ public class Utils {
 	}
     }
 
+    @SuppressWarnings("unchecked")
+    public static int compare(Object[] a, Object[] b) {
+	int i = 0;
+	for(i = 0; (i < a.length) && (i < b.length); i++) {
+	    if((a[i] == null) && (b[i] == null)) {
+	    } else if(a[i] == null) {
+		return(-1);
+	    } else if(b[i] == null) {
+		return(1);
+	    } else {
+		if(a[i].getClass() != b[i].getClass()) {
+		    return(a[i].getClass().getName().compareTo(b[i].getClass().getName()));
+		} else if(Comparable.class.isAssignableFrom(a[i].getClass())) {
+		    return(((Comparable)a[i]).compareTo(b[i]));
+		} else {
+		    if(a[i] != b[i])
+			return(sidcmp(a[i], b[i]));
+		}
+	    }
+	}
+	if(a.length < b.length)
+	    return(-1);
+	if(a.length > b.length)
+	    return(1);
+	return(0);
+    }
+
     public static final Comparator<Object> idcmp = new Comparator<Object>() {
 	int eid = 0;
 	final Map<Ref, Long> emerg = new HashMap<Ref, Long>();
@@ -2299,26 +2258,6 @@ public class Utils {
 	    }
 	}
     };
-
-	public static String timestamp() {
-		return new SimpleDateFormat("HH:mm").format(new Date());
-	}
-
-	public static String stream2str(InputStream is) {
-		StringBuilder buffer = new StringBuilder();
-		BufferedReader in = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
-		String line;
-		boolean first = true;
-		try {
-			while ((line = in.readLine()) != null) {
-				if(!first) {buffer.append("\n");}
-				buffer.append(line);
-				first = false;
-			}
-		} catch (IOException ignored) {
-		}
-		return buffer.toString();
-	}
 
     static {
 	Console.setscmd("die", new Console.Command() {
@@ -2388,23 +2327,4 @@ public class Utils {
 		}
 	    });
     }
-
-	public static String fmt1DecPlace(double value) {
-		double rvalue = (double) Math.round(value * 10) / 10;
-		return (rvalue % 1 == 0) ? Integer.toString((int)rvalue) : Double.toString(rvalue);
-	}
-
-	private static final Pattern RESID = Pattern.compile(".*\\[([^,]*),?.*]");
-
-	public static String prettyResName(String resname) {
-		Matcher m = RESID.matcher(resname);
-		if(m.matches()) {
-			resname = m.group(1);
-		}
-		int k = resname.lastIndexOf("/");
-		resname = resname.substring(k + 1);
-		resname = resname.substring(0, 1).toUpperCase() + resname.substring(1);
-		return resname;
-	}
-
 }

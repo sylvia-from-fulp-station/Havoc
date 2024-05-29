@@ -26,14 +26,6 @@
 
 package haven;
 
-import haven.map.PingSprite;
-import haven.res.ui.music.MusicWnd;
-
-import javax.sound.sampled.AudioFormat;
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.UnsupportedAudioFileException;
-import java.io.File;
 import java.util.*;
 import java.awt.Color;
 import java.awt.Font;
@@ -51,7 +43,7 @@ import java.awt.datatransfer.*;
 public class ChatUI extends Widget {
     public static final RichText.Foundry fnd = new RichText.Foundry(new ChatParser(TextAttribute.FONT, Text.dfont.deriveFont(UI.scale(12f)), TextAttribute.FOREGROUND, Color.BLACK)).aa(true);
     public static final Text.Foundry qfnd = new Text.Foundry(Text.dfont, 12, new java.awt.Color(192, 255, 192));
-    public static final int selw = UI.scale(150);
+    public static final int selw = UI.scale(130);
     public static final Coord marg = UI.scale(new Coord(9, 9));
     public static final Color[] urgcols = new Color[] {
 	null,
@@ -74,21 +66,9 @@ public class ChatUI extends Widget {
 	setcanfocus(true);
     }
 
-	public Map<String, ChatUI.MultiChat> getMultiChannels() {
-		Map<String, ChatUI.MultiChat> channels = new HashMap<>();
-		for (Widget w = ui.gui.chat.lchild; w != null; w = w.prev) {
-			if (w instanceof ChatUI.MultiChat) {
-				ChatUI.MultiChat chat = ((ChatUI.MultiChat) w);
-				channels.put(chat.name, chat);
-			}
-		}
-		return channels;
-	}
-
     protected void added() {
 	base = this.c;
-	//resize(this.sz); // ND: Changed this
-	resize(savedw,savedh);
+	resize(this.sz);
     }
 
     public static class ChatAttribute extends Attribute {
@@ -97,14 +77,13 @@ public class ChatUI extends Widget {
 	}
 
 	public static final Attribute HYPERLINK = new ChatAttribute("hyperlink");
-	public static final Attribute HEARTHSECRET = new ChatAttribute("hearthsecret");
     }
 
     public static class ChatParser extends RichText.Parser {
 	public static final Pattern urlpat = Pattern.compile("\\b((https?://)|(www\\.[a-z0-9_.-]+\\.[a-z0-9_.-]+))[a-z0-9/_.~#%+?&:*=-]*", Pattern.CASE_INSENSITIVE);
 	public static final Map<? extends Attribute, ?> urlstyle = RichText.fillattrs(TextAttribute.FOREGROUND, new Color(64, 64, 255),
 										      TextAttribute.UNDERLINE, TextAttribute.UNDERLINE_ON);
-	public static final Pattern hspat = Pattern.compile("\\bhs: ?(.*)", Pattern.CASE_INSENSITIVE);
+
 	public ChatParser(Object... args) {
 	    super(args);
 	}
@@ -112,22 +91,10 @@ public class ChatUI extends Widget {
 	protected RichText.Part text(PState s, String text, Map<? extends Attribute, ?> attrs) throws IOException {
 	    RichText.Part ret = null;
 	    int p = 0;
+	    while(true) {
 		Matcher m = urlpat.matcher(text);
-		Matcher m2 = hspat.matcher(text);
-		while(true) {
-		if(!m.find(p) || (m2.find(p) && m2.start() < m.start())) {
-			if(!m2.find(p))
-				break;
-			String hs = text.substring(m2.start()+3, m2.end());
-			RichText.Part lead = new RichText.TextPart(text.substring(p, m2.start()), attrs);
-			if(ret == null) ret = lead; else ret.append(lead);
-			Map<Attribute, Object> na = new HashMap<Attribute, Object>(attrs);
-			na.putAll(urlstyle);
-			na.put(ChatAttribute.HEARTHSECRET, hs);
-			ret.append(new RichText.TextPart(text.substring(m2.start(), m2.end()), na));
-			p = m2.end();
-			continue;
-		}
+		if(!m.find(p))
+		    break;
 		URI uri;
 		try {
 		    String su = text.substring(m.start(), m.end());
@@ -286,14 +253,13 @@ public class ChatUI extends Widget {
 		rm.clear();
 	    }
 	}
-	
+
 	public static class SimpleMessage extends Message {
 	    public final String text;
 	    public final Color col;
-		private final String timestamp = Utils.timestamp();
 
 	    public SimpleMessage(String text, Color col) {
-		this.text = "[" + timestamp + "] " + text;;
+		this.text = text;
 		this.col = col;
 	    }
 
@@ -688,11 +654,6 @@ public class ChatUI extends Widget {
 		    getparent(GameUI.class).error("Could not launch web browser.");
 		}
 	    }
-		String hs = (String) inf.getAttribute(ChatAttribute.HEARTHSECRET);
-		if(hs != null) {
-			ui.gui.buddies.show();
-			ui.gui.buddies.wdgmsg("bypwd", hs );
-		}
 	}
 
 	public boolean mouseup(Coord c, int btn) {
@@ -879,7 +840,7 @@ public class ChatUI extends Widget {
 		Color col = null;
 		if(args.length > 1) col = (Color)args[1];
 		if(col == null) col = Color.WHITE;
-		int urgency = (args.length > 2) ? (Integer)args[2] : 0;
+		int urgency = (args.length > 2) ? Utils.iv(args[2]) : 0;
 		Message cmsg = new SimpleMessage(line, col);
 		append(cmsg, urgency);
 	    } else {
@@ -894,14 +855,13 @@ public class ChatUI extends Widget {
 
     public static class MultiChat extends EntryChannel {
 	public final int urgency;
-	final String name;
+	private final String name;
 	private final Map<Integer, Color> pc = new HashMap<Integer, Color>();
 
 	public class NamedMessage extends Message {
 	    public final int from;
 	    public final String text;
 	    public final Color col;
-		private final String timestamp = Utils.timestamp();
 
 	    public NamedMessage(int from, String text, Color col) {
 		this.from = from;
@@ -919,13 +879,13 @@ public class ChatUI extends Widget {
 		}
 
 		public Text get() {
-		    return(fnd.render(RichText.Parser.quote(String.format("%s: %s", "[" + timestamp + "] " + nm, text)), w, TextAttribute.FOREGROUND, col));
+		    return(fnd.render(RichText.Parser.quote(String.format("%s: %s", nm, text)), w, TextAttribute.FOREGROUND, col));
 		}
 	    }
 
 	    private String nm() {
 		BuddyWnd.Buddy b = getparent(GameUI.class).buddies.find(from);
-		return((b == null) ? "??? (Not Memorised)" : b.name);
+		return((b == null) ? "???" : b.name);
 	    }
 
 	    public Indir<Text> render(int w) {
@@ -966,99 +926,16 @@ public class ChatUI extends Widget {
 	    }
 	}
 
-	static private final File mapPingFile = new File("res/sfx/mapPing.wav");
-		public boolean process(String msg, long from) {
-			if (msg.startsWith("@")) {
-				Pattern highlight = Pattern.compile("^@(-?\\d+)$");
-				Matcher matcher = highlight.matcher(msg);
-				if(matcher.matches()){
-					try {
-						Gob gob = ui.gui.map.glob.oc.getgob(Long.parseLong(matcher.group(1)));
-						if (gob != null) {
-							if (name.equals("Party")) {
-								gob.highlight(OptWnd.partyObjectPingColorOptionWidget.currentColor);
-							} else if (name.equals("Area Chat")) {
-								gob.highlight(OptWnd.objectPingColorOptionWidget.currentColor);
-							}
-						}
-						return false;
-					} catch (Exception ignored){}
-				}
-				return true;
-			} else if(msg.startsWith("LOC@")) {
-				if (from == -1)
-					return false;
-				Pattern highlight = Pattern.compile("^LOC@(-?\\d+)x(-?\\d+)$");
-				Matcher matcher = highlight.matcher(msg);
-				if(matcher.matches()){
-					try {
-						synchronized (ui.sess.glob.party.memb) {
-							Party.Member pm = ui.sess.glob.party.memb.get(from);
-							Gob player = ui.gui.map.player();
-							if (player != null && pm != null) {
-								Coord2d playerc = player.rc;
-								Coord2d partyc = pm.getc();
-								if (playerc.dist(partyc) < 975*11) {
-									Coord2d playertopartym = partyc.sub(playerc);
-									Coord2d partyoffset = new Coord2d(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)));
-									Coord2d pingc = playerc.add(playertopartym).add(partyoffset);
-									ui.gui.mapfile.view.addSprite(new PingSprite(pingc, pm.col, 4));
-									try {
-										AudioInputStream in = AudioSystem.getAudioInputStream(mapPingFile);
-										AudioFormat tgtFormat = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, 44100, 16, 2,4, 44100, false);
-										AudioInputStream pcmStream = AudioSystem.getAudioInputStream(tgtFormat, in);
-										Audio.CS klippi = new Audio.PCMClip(pcmStream, 2, 2);
-										((Audio.Mixer)Audio.player.stream).add(new Audio.VolAdjust(klippi, 0.7));
-									} catch(UnsupportedAudioFileException e) {
-										e.printStackTrace();
-									} catch(IOException e) {
-										e.printStackTrace();
-									}
-								} else {
-									System.out.println("player is too far away");
-								}
-							} else {
-								System.out.println("player is not in same instance as party member");
-							}
-						}
-
-					} catch (Exception ignored){}
-					return false;
-				}
-			} else if (msg.startsWith("HFMPL@@@")) {
-				try {
-					final String hfmplayer = msg.substring("HFMPL@@@".length());
-					final String[] hfmargs = hfmplayer.split("\\|");
-					if (hfmargs.length > 2) {
-						ui.gui.error("Cannot understand hfmp synch message");
-					}
-					Arrays.stream(hfmargs).forEach(System.out::println);
-					final long timetoplay = Long.parseLong(hfmargs[0]);
-					final String track = hfmargs[1];
-					for (Widget w = ui.gui.lchild; w != null; w = w.prev) {
-						if (w instanceof MusicWnd) {
-							final MusicWnd musicWnd = (MusicWnd)w;
-							musicWnd.hafenMidiplayer.synchPlay(timetoplay, track);
-						}
-					}
-				}
-				catch (NumberFormatException ex2) {}
-			}
-			return true;
-		}
-
 	public void uimsg(String msg, Object... args) {
 	    if(msg == "msg") {
-		Integer from = (Integer) args[0];
-		String line = (String) args[1];
-			if(process(line, -1)) {
-				if (from == null) {
-					append(new MyMessage(line), -1);
-				} else {
-					Message cmsg = new NamedMessage(from, line, fromcolor(from));
-					append(cmsg, urgency);
-				}
-			}
+		Number from = (Number)args[0];
+		String line = (String)args[1];
+		if(from == null) {
+		    append(new MyMessage(line), -1);
+		} else {
+		    Message cmsg = new NamedMessage(from.intValue(), line, fromcolor(from.intValue()));
+		    append(cmsg, urgency);
+		}
 	    } else {
 		super.uimsg(msg, args);
 	    }
@@ -1076,23 +953,21 @@ public class ChatUI extends Widget {
 
 	public void uimsg(String msg, Object... args) {
 	    if(msg == "msg") {
-		Integer from = (Integer)args[0];
-		long gobid = Utils.uint32((Integer)args[1]);
+		Number from = (Number)args[0];
+		long gobid = Utils.uiv(args[1]);
 		String line = (String)args[2];
-			if(process(line, gobid)) {
-				Color col = Color.WHITE;
-				synchronized (ui.sess.glob.party.memb) {
-					Party.Member pm = ui.sess.glob.party.memb.get(gobid);
-					if (pm != null)
-						col = pm.col;
-				}
-				if (from == null) {
-					append(new MyMessage(line), -1);
-				} else {
-					Message cmsg = new NamedMessage(from, line, Utils.blendcol(col, Color.WHITE, 0.5));
-					append(cmsg, urgency);
-				}
-			}
+		Color col = Color.WHITE;
+		synchronized(ui.sess.glob.party.memb) {
+		    Party.Member pm = ui.sess.glob.party.memb.get(gobid);
+		    if(pm != null)
+			col = pm.col;
+		}
+		if(from == null) {
+		    append(new MyMessage(line), -1);
+		} else {
+		    Message cmsg = new NamedMessage(from.intValue(), line, Utils.blendcol(col, Color.WHITE, 0.5));
+		    append(cmsg, urgency);
+		}
 	    } else {
 		super.uimsg(msg, args);
 	    }
@@ -1141,7 +1016,7 @@ public class ChatUI extends Widget {
 	public String name() {
 	    BuddyWnd.Buddy b = getparent(GameUI.class).buddies.find(other);
 	    if(b == null)
-		return("??? (Not Memorised)");
+		return("???");
 	    else
 		return(b.name);
 	}
@@ -1153,7 +1028,7 @@ public class ChatUI extends Widget {
 	    String name = (String)args[0];
 	    Channel ret = new SimpleChat(false, name);
 	    if(args.length > 1)
-		ret.icon(ui.sess.getres((Integer)args[1]));
+		ret.icon(ui.sess.getresv(args[1]));
 	    return(ret);
 	}
     }
@@ -1161,10 +1036,10 @@ public class ChatUI extends Widget {
     public static class $MChat implements Factory {
 	public Widget create(UI ui, Object[] args) {
 	    String name = (String)args[0];
-	    int urgency = (Integer)args[1];
+	    int urgency = Utils.iv(args[1]);
 	    Channel ret = new MultiChat(false, name, urgency);
 	    if(args.length > 2)
-		ret.icon(ui.sess.getres((Integer)args[2]));
+		ret.icon(ui.sess.getresv(args[2]));
 	    return(ret);
 	}
     }
@@ -1173,17 +1048,17 @@ public class ChatUI extends Widget {
 	public Widget create(UI ui, Object[] args) {
 	    Channel ret = new PartyChat();
 	    if(args.length > 0)
-		ret.icon(ui.sess.getres((Integer)args[0]));
+		ret.icon(ui.sess.getresv(args[0]));
 	    return(ret);
 	}
     }
     @RName("pmchat")
     public static class $PMChat implements Factory {
 	public Widget create(UI ui, Object[] args) {
-	    int other = (Integer)args[0];
+	    int other = Utils.iv(args[0]);
 	    Channel ret = new PrivChat(true, other);
 	    if(args.length > 1)
-		ret.icon(ui.sess.getres((Integer)args[1]));
+		ret.icon(ui.sess.getresv(args[1]));
 	    return(ret);
 	}
     }
@@ -1347,7 +1222,7 @@ public class ChatUI extends Widget {
 			g.aimage(icon, Coord.of(x, my), 0.0, 0.5); x += icon.sz().x;
 			g.aimage(name, Coord.of(x, my), 0.0, 0.5);
 		    }
-		    g.image(chandiv, Coord.of(UI.scale(6), y + chanseld.sz().y));
+		    g.image(chandiv, Coord.of(0, y + chanseld.sz().y));
 		}
 	    }
 	}
@@ -1549,7 +1424,7 @@ public class ChatUI extends Widget {
 	g.rimagev(bvlb, new Coord(0, bulc.sz().y), sz.y - bulc.sz().y);
 	g.rimagev(bvrb, new Coord(sz.x - bvrb.sz().x, burc.sz().y), sz.y - burc.sz().y);
 	g.rimageh(bhb, new Coord(bulc.sz().x, 0), sz.x - bulc.sz().x - burc.sz().x);
-	//g.aimage(bmf, new Coord(sz.x / 2, 0), 0.5, 0); ND: Commented this
+	g.aimage(bmf, new Coord(sz.x / 2, 0), 0.5, 0);
 	if((sel == null) || (sel.cb == null))
 	    g.aimage(bcbd, new Coord(sz.x, 0), 1, 0);
     }
@@ -1656,54 +1531,36 @@ public class ChatUI extends Widget {
 
     private UI.Grab dm = null;
     private Coord doff;
-    private static final int minh = 96; //ND: Decreased from 111 to 96
-	public int savedh = UI.scale(Math.max(minh, Utils.getprefc("chatsize", new Coord(UI.scale(410), minh)).y));
-	public int savedw = UI.scale(Math.max(minh, Utils.getprefc("chatsize", new Coord(UI.scale(410), minh)).x));
-	private boolean resizehoriz = false;
-	public boolean mousedown(Coord c, int button) {
-		if (button == 1 && c.x > sz.x - 9) {
-			dm = ui.grabmouse(this);
-			doff = c;
-			resizehoriz = true;
-			return (true);
-		}
-		else if((button == 1) && (c.y < bmf.sz().y)) {
-			dm = ui.grabmouse(this);
-			doff = c;
-			return(true);
-		} else {
-			return(super.mousedown(c, button));
-		}
-	}
-
-	public void mousemove(Coord c) {
-		if (dm != null) {
-			if (resizehoriz) {
-				resize(Math.max(UI.scale(410), Math.min(parent.sz.x - UI.scale(226), sz.x + c.x - doff.x)), savedh);
-				doff = c;
-			} else {
-				if (GameUI.questObjectivesPanel != null){ // ND: IF IT EXISTS.
-					GameUI.questObjectivesPanel.presize(); // ND: move the quest objectives panel as we resize the chat vertically
-				}
-				//resize(sz.x, savedh = Math.max(UI.scale(minh), sz.y + doff.y - c.y)); // ND: prevent the user from dragging the chat beyond the game window size, or even too close to it.
-				resize(sz.x, savedh = Math.max(UI.scale(minh), Math.min(parent.sz.y - UI.scale(120), sz.y + doff.y - c.y)));
-			}
-		} else {
-			super.mousemove(c);
-		}
-	}
-
-	public boolean mouseup(Coord c, int button) {
-	if(dm != null) {
-		dm.remove();
-		dm = null;
-		Utils.setprefc("chatsize", UI.unscale(sz));
-		resizehoriz = false;
-		return(true);
+    private static final int minh = 111;
+    public boolean mousedown(Coord c, int button) {
+	int bmfx = (sz.x - bmf.sz().x) / 2;
+	if((button == 1) && (c.y < bmf.sz().y) && (c.x >= bmfx) && (c.x <= (bmfx + bmf.sz().x))) {
+	    dm = ui.grabmouse(this);
+	    doff = c;
+	    return(true);
 	} else {
-		return(super.mouseup(c, button));
+	    return(super.mousedown(c, button));
 	}
+    }
+
+    public void mousemove(Coord c) {
+	if(dm != null) {
+	    resize(sz.x, Math.max(UI.scale(minh), sz.y + doff.y - c.y));
+	} else {
+	    super.mousemove(c);
 	}
+    }
+
+    public boolean mouseup(Coord c, int button) {
+	if(dm != null) {
+	    dm.remove();
+	    dm = null;
+	    Utils.setprefi("chatsize", UI.unscale(sz.y));
+	    return(true);
+	} else {
+	    return(super.mouseup(c, button));
+	}
+    }
 
     public boolean keydown(KeyEvent ev) {
 	boolean M = (ev.getModifiersEx() & (KeyEvent.META_DOWN_MASK | KeyEvent.ALT_DOWN_MASK)) != 0;
@@ -1747,15 +1604,15 @@ public class ChatUI extends Widget {
 	}
     }
 
-    public static final KeyBinding kb_quick = KeyBinding.get("chat-quick", KeyMatch.nil);
+    public static final KeyBinding kb_quick = KeyBinding.get("chat-quick", KeyMatch.forcode(KeyEvent.VK_ENTER, 0));
     public boolean globtype(char key, KeyEvent ev) {
-//	if(kb_quick.key().match(ev)) {
-//	    if(!visible && (sel instanceof EntryChannel)) {
-//		qgrab = ui.grabkeys(this);
-//		qline = new QuickLine((EntryChannel)sel);
-//		return(true);
-//	    }
-//	}
+	if(kb_quick.key().match(ev)) {
+	    if(!visible && (sel instanceof EntryChannel)) {
+		qgrab = ui.grabkeys(this);
+		qline = new QuickLine((EntryChannel)sel);
+		return(true);
+	    }
+	}
 	return(super.globtype(key, ev));
     }
 }

@@ -26,34 +26,39 @@
 
 package haven;
 
-import java.awt.*;
+import haven.render.*;
+import java.util.function.*;
+import java.awt.Color;
 import java.awt.image.BufferedImage;
 import static haven.PUtils.*;
 
 public class Window extends Widget implements DTarget {
-    public static final Tex bg = Resource.loadtex("gfx/hud/wnd/lg/bg"); // background seamless image
-    public static final Tex bgl = Resource.loadtex("gfx/hud/wnd/lg/bgl"); // left green bg overlay (leaves or whatever the fuck)
-    public static final Tex bgr = Resource.loadtex("gfx/hud/wnd/lg/bgr"); // right green bg overlay (leaves or whatever the fuck)
-    public static final Tex cl = Resource.loadtex("gfx/hud/wnd/lg/cl"); // top left corner
-    public static final TexI cm = new TexI(Resource.loadsimg("gfx/hud/wnd/lg/cm")); // top seamless big
-    public static final Tex cr = Resource.loadtex("gfx/hud/wnd/lg/cr"); // top current big end
-    public static final Tex tm = Resource.loadtex("gfx/hud/wnd/lg/tm"); // top seamless small
-    public static final Tex tr = Resource.loadtex("gfx/hud/wnd/lg/tr"); // top right corner
-    public static final Tex lm = Resource.loadtex("gfx/hud/wnd/lg/lm"); // left margin? super short margin? seamless extender? some shit
-    public static final Tex lb = Resource.loadtex("gfx/hud/wnd/lg/lb"); // left lower margin
-    public static final Tex rm = Resource.loadtex("gfx/hud/wnd/lg/rm"); // right margin? long margin? it's like 50 times longer than "lm"
-    public static final Tex bl = Resource.loadtex("gfx/hud/wnd/lg/bl"); // bottom left corner
-    public static final Tex bm = Resource.loadtex("gfx/hud/wnd/lg/bm"); // bottom margin?
-    public static final Tex br = Resource.loadtex("gfx/hud/wnd/lg/br"); // bottom right corner
-    public static final Tex sizer = Resource.loadtex("gfx/hud/wnd/sizer"); // corner resizer
+    public static final Pipe.Op bgblend = FragColor.blend.nil;
+    public static final Pipe.Op cblend  = FragColor.blend(new BlendMode(BlendMode.Function.ADD, BlendMode.Factor.SRC_ALPHA, BlendMode.Factor.INV_SRC_ALPHA,
+									BlendMode.Function.ADD, BlendMode.Factor.ONE, BlendMode.Factor.INV_SRC_ALPHA));
+    public static final Tex bg = Resource.loadtex("gfx/hud/wnd/lg/bg");
+    public static final Tex bgl = Resource.loadtex("gfx/hud/wnd/lg/bgl");
+    public static final Tex bgr = Resource.loadtex("gfx/hud/wnd/lg/bgr");
+    public static final Tex cl = Resource.loadtex("gfx/hud/wnd/lg/cl");
+    public static final TexI cm = new TexI(Resource.loadsimg("gfx/hud/wnd/lg/cm"));
+    public static final Tex cr = Resource.loadtex("gfx/hud/wnd/lg/cr");
+    public static final Tex tm = Resource.loadtex("gfx/hud/wnd/lg/tm");
+    public static final Tex tr = Resource.loadtex("gfx/hud/wnd/lg/tr");
+    public static final Tex lm = Resource.loadtex("gfx/hud/wnd/lg/lm");
+    public static final Tex lb = Resource.loadtex("gfx/hud/wnd/lg/lb");
+    public static final Tex rm = Resource.loadtex("gfx/hud/wnd/lg/rm");
+    public static final Tex bl = Resource.loadtex("gfx/hud/wnd/lg/bl");
+    public static final Tex bm = Resource.loadtex("gfx/hud/wnd/lg/bm");
+    public static final Tex br = Resource.loadtex("gfx/hud/wnd/lg/br");
+    public static final Tex sizer = Resource.loadtex("gfx/hud/wnd/sizer");
     public static final Coord tlm = UI.scale(18, 30);
     public static final Coord brm = UI.scale(13, 22);
-    public static final Coord cpo = UI.rscale(27, 13); // ND: Changed this from (36, 16.4). I don't remember why
+    public static final Coord cpo = UI.rscale(36, 16.4);
     public static final int capo = 7, capio = 2;
-    public static final Coord dlmrgn = UI.scale(23, 14); // ND: Changed from (23, 14). It's the margins iirc
+    public static final Coord dlmrgn = UI.scale(23, 14);
     public static final Coord dsmrgn = UI.scale(9, 9);
     public static final BufferedImage ctex = Resource.loadsimg("gfx/hud/fonttex");
-    public static final Text.Furnace cf = new Text.Imager(new PUtils.TexFurn(new Text.Foundry(Text.sans, 15).aa(true), ctex)) {
+    public static final Text.Furnace cf = new Text.Imager(new PUtils.TexFurn(new Text.Foundry(Text.fraktur, 15).aa(true), ctex)) {
 	    protected BufferedImage proc(Text text) {
 		// return(rasterimg(blurmask2(text.img.getRaster(), 1, 1, Color.BLACK)));
 		return(rasterimg(blurmask2(text.img.getRaster(), UI.rscale(0.75), UI.rscale(1.0), Color.BLACK)));
@@ -70,31 +75,26 @@ public class Window extends Widget implements DTarget {
 	    public Coord cisz() {return(super.cisz().sub(co.mul(2)));}
 	};
     private static final BufferedImage[] cbtni = new BufferedImage[] {
-	Resource.loadsimg("gfx/hud/wnd/lg/cbtnu"), // close button up
-	Resource.loadsimg("gfx/hud/wnd/lg/cbtnd"), // close button down
-	Resource.loadsimg("gfx/hud/wnd/lg/cbtnh")}; // close button hover
-//    public final Coord tlo, rbo, mrgn;
-//    public final IButton cbtn;
-	public Deco deco;
+	Resource.loadsimg("gfx/hud/wnd/lg/cbtnu"),
+	Resource.loadsimg("gfx/hud/wnd/lg/cbtnd"),
+	Resource.loadsimg("gfx/hud/wnd/lg/cbtnh")};
+    public Deco deco;
     public boolean dt = false;
     public String cap;
-    public UI.Grab dm = null;
+    public TexRaw gbuf = null;
+    private FragColor gout;
+    private Pipe.Op gbasic;
+    private UI.Grab dm = null;
     private Coord doff;
     public boolean decohide = false;
     public boolean large = false;
-
-	//Alternative UI
-	public static boolean useAlternativeUi = Utils.getprefb("useAlternativeUiTheme", false);
-	public static final Tex backgroundBlack = Resource.loadtex("gfx/hud/wnd/simplified/bg");
-	public static final Tex bottomRightSimplified = Resource.loadtex("gfx/hud/wnd/simplified/br");
-	public static final Tex topLeftSimplified = Resource.loadtex("gfx/hud/wnd/simplified/cl");
 
     @RName("wnd")
     public static class $_ implements Factory {
 	public Widget create(UI ui, Object[] args) {
 	    Coord sz = UI.scale((Coord)args[0]);
 	    String cap = (args.length > 1) ? (String)args[1] : null;
-	    boolean lg = (args.length > 2) ? ((Integer)args[2] != 0) : false;
+	    boolean lg = (args.length > 2) ? Utils.bv(args[2]) : false;
 	    return(new Window(sz, cap, lg));
 	}
     }
@@ -124,8 +124,9 @@ public class Window extends Widget implements DTarget {
     }
 
     protected void added() {
+	super.added();
 	parent.setfocus(this);
-	preventDraggingOutside();
+	initanim();
     }
 
     public void chcap(String cap) {
@@ -184,13 +185,12 @@ public class Window extends Widget implements DTarget {
 	public boolean dragsize;
 	public Area aa, ca;
 	public Coord cptl = Coord.z, cpsz = Coord.z;
-	public Coord wsz;
 	public int cmw;
 	public Text cap = null;
 
 	public DefaultDeco(boolean lg) {
 	    this.lg = lg;
-	    cbtn = add(new IButton(cbtni[0], cbtni[1], cbtni[2])).action(() -> parent.wdgmsg("close"));
+	    cbtn = add(new IButton(cbtni[0], cbtni[1], cbtni[2])).action(() -> ((Window)parent).reqclose());
 	}
 	public DefaultDeco() {this(false);}
 
@@ -203,12 +203,11 @@ public class Window extends Widget implements DTarget {
 	    Coord mrgn = lg ? dlmrgn : dsmrgn;
 	    Coord asz = isz;
 	    Coord csz = asz.add(mrgn.mul(2));
-	    wsz = csz.add(tlm).add(brm);
+	    Coord wsz = csz.add(tlm).add(brm);
 	    resize(wsz);
 	    ca = Area.sized(tlm, csz);
 	    aa = Area.sized(ca.ul.add(mrgn), asz);
-	    cbtn.c = Coord.of(sz.x - cbtn.sz.x - UI.scale(9), - UI.scale(3)); // ND: UI Window close button location
-		cpsz = Coord.of((int)(wsz.x*0.95), cm.sz().y).sub(cptl); // ND: changed this to make the window top bar fully draggable WHEN RESIZED (for instance, buddy window)
+	    cbtn.c = Coord.of(sz.x - cbtn.sz.x, 0);
 	}
 
 	public Area contarea() {
@@ -220,24 +219,19 @@ public class Window extends Widget implements DTarget {
 	}
 
 	protected void drawbg(GOut g) {
-		Coord bgc = new Coord();
-		if(useAlternativeUi) {
-			for(bgc.y = ca.ul.y; bgc.y < ca.br.y; bgc.y += bg.sz().y) {
-				for(bgc.x = ca.ul.x; bgc.x < ca.br.x; bgc.x += bg.sz().x)
-					g.image(backgroundBlack, new Coord(bgc.x-2, bgc.y-2), new Coord(ca.ul.x, ca.ul.y), new Coord(ca.br.x+2, ca.br.y+2));
-			}
-		} else {
-			for(bgc.y = ca.ul.y; bgc.y < ca.br.y; bgc.y += bg.sz().y) {
-				for(bgc.x = ca.ul.x; bgc.x < ca.br.x; bgc.x += bg.sz().x)
-					g.image(bg, bgc, ca.ul, ca.br);
-			}
-			bgc.x = ca.ul.x;
-			for(bgc.y = ca.ul.y; bgc.y < ca.br.y; bgc.y += bgl.sz().y)
-				g.image(bgl, bgc, ca.ul, ca.br);
-			bgc.x = ca.br.x - bgr.sz().x;
-			for(bgc.y = ca.ul.y; bgc.y < ca.br.y; bgc.y += bgr.sz().y)
-				g.image(bgr, bgc, ca.ul, ca.br);
-		}
+	    g.usestate(bgblend);
+	    Coord bgc = new Coord();
+	    for(bgc.y = ca.ul.y; bgc.y < ca.br.y; bgc.y += bg.sz().y) {
+		for(bgc.x = ca.ul.x; bgc.x < ca.br.x; bgc.x += bg.sz().x)
+		    g.image(bg, bgc, ca.ul, ca.br);
+	    }
+	    g.defstate();
+	    bgc.x = ca.ul.x;
+	    for(bgc.y = ca.ul.y; bgc.y < ca.br.y; bgc.y += bgl.sz().y)
+		g.image(bgl, bgc, ca.ul, ca.br);
+	    bgc.x = ca.br.x - bgr.sz().x;
+	    for(bgc.y = ca.ul.y; bgc.y < ca.br.y; bgc.y += bgr.sz().y)
+		g.image(bgr, bgc, ca.ul, ca.br);
 	}
 
 	protected void drawframe(GOut g) {
@@ -247,18 +241,13 @@ public class Window extends Widget implements DTarget {
 		cmw = (cap == null) ? 0 : cap.sz().x;
 		cmw = Math.max(cmw, this.sz.x / 4);
 		cptl = Coord.of(ca.ul.x, 0);
-//		cpsz = Coord.of(cpo.x + cmw, cm.sz().y).sub(cptl);
-		cpsz = Coord.of((int)(wsz.x*0.95), cm.sz().y).sub(cptl); // ND: changed this to make the window top bar fully draggable
+		cpsz = Coord.of(cpo.x + cmw, cm.sz().y).sub(cptl);
 		cmw = cmw - (cl.sz().x - cpo.x) - UI.scale(5);
 	    }
 	    if(dragsize)
 		g.image(sizer, ca.br.sub(sizer.sz()));
 	    Coord mdo, cbr;
-		if(useAlternativeUi){
-			g.image(topLeftSimplified, Coord.z);
-		} else {
-			g.image(cl, Coord.z);
-		}
+	    g.image(cl, Coord.z);
 	    mdo = Coord.of(cl.sz().x, 0);
 	    cbr = mdo.add(cmw, cm.sz().y);
 	    for(int x = 0; x < cmw; x += cm.sz().x)
@@ -290,12 +279,7 @@ public class Window extends Widget implements DTarget {
 	    cbr = Coord.of(sz.x - br.sz().x, sz.y);
 	    for(; mdo.x < cbr.x; mdo.x += bm.sz().x)
 		g.image(bm, mdo, Coord.z, cbr);
-		if(useAlternativeUi){
-			g.image(bottomRightSimplified, sz.sub(br.sz()));
-		} else {
-			g.image(br, sz.sub(br.sz()));
-		}
-
+	    g.image(br, sz.sub(br.sz()));
 	}
 
 	public void draw(GOut g) {
@@ -305,7 +289,7 @@ public class Window extends Widget implements DTarget {
 	    super.draw(g);
 	}
 
-	public UI.Grab szdrag;
+	private UI.Grab szdrag;
 	private Coord szdragc;
 	public boolean mousedown(Coord c, int button) {
 	    if(dragsize) {
@@ -343,6 +327,41 @@ public class Window extends Widget implements DTarget {
     public void cdraw(GOut g) {
     }
 
+    public Pipe.Op gbasic() {
+	if((gbuf == null) || !Utils.eq(sz, gbuf.back.tex.sz())) {
+	    if(gbuf != null)
+		gbuf.dispose();
+	    gbuf = new TexRaw(new Texture2D.Sampler2D(new Texture2D(this.sz, DataBuffer.Usage.STATIC, new VectorFormat(4, NumberFormat.UNORM8), null)), true);
+	    gbuf.back.minfilter(Texture.Filter.LINEAR).magfilter(Texture.Filter.LINEAR);
+	    gout = new FragColor<>(gbuf.back.tex.image(0));
+	    Area garea = Area.sized(this.sz);
+	    gbasic = Pipe.Op.compose(gout, DepthBuffer.slot.nil, cblend,
+				     new States.Viewport(garea), new Ortho2D(garea));
+	}
+	return(gbasic);
+    }
+
+    protected void drawbuf(GOut g) {
+	super.draw(g);
+    }
+
+    protected void drawfin(GOut g, Tex buf) {
+	if(anim != null)
+	    anim.draw(g, buf);
+	else
+	    g.image(buf, Coord.z);
+    }
+
+    public void draw(GOut og) {
+	if(animst != "dest") {
+	    GOut g = new GOut(og.out, og.basicstate().prep(gbasic()), this.sz);
+	    g.out.clear(g.state(), FragColor.fragcol, FColor.BLACK_T);
+	    drawbuf(g);
+	}
+	if(gbuf != null)
+	    drawfin(og, gbuf);
+    }
+
     public Coord contentsz() {
 	Coord max = new Coord(0, 0);
 	for(Widget wdg = child; wdg != null; wdg = wdg.next) {
@@ -359,10 +378,6 @@ public class Window extends Widget implements DTarget {
 	return(max);
     }
 
-	public String caption() {
-		return (cap != null) ? cap : null;
-	}
-
     public Area ca() {
 	if(deco == null)
 	    return(Area.sized(this.sz));
@@ -374,17 +389,18 @@ public class Window extends Widget implements DTarget {
 	return(ca().sz());
     }
 
-	private void resize2(Coord sz) {
-		if(deco != null) {
-			deco.iresize(sz);
-			deco.c = deco.contarea().ul.inv();
-			this.sz = deco.sz;
-		} else {
-			this.sz = sz;
-		}
-		for(Widget ch = child; ch != null; ch = ch.next)
-			ch.presize();
+    private void resize2(Coord sz) {
+	Coord psz = this.sz;
+	if(deco != null) {
+	    deco.iresize(sz);
+	    deco.c = deco.contarea().ul.inv();
+	    this.sz = deco.sz;
+	} else {
+	    this.sz = sz;
 	}
+	for(Widget ch = child; ch != null; ch = ch.next)
+	    ch.presize();
+    }
 
     public void resize(Coord sz) {
 	resize2(sz);
@@ -403,12 +419,12 @@ public class Window extends Widget implements DTarget {
 
     public void uimsg(String msg, Object... args) {
 	if(msg == "dt") {
-	    dt = (Integer)args[0] != 0;
+	    dt = Utils.bv(args[0]);
 	} else if(msg == "cap") {
 	    String cap = (String)args[0];
 	    chcap(cap.equals("") ? null : cap);
 	} else if(msg == "dhide") {
-	    decohide((Integer)args[0] != 0);
+	    decohide(Utils.bv(args[0]));
 	} else {
 	    super.uimsg(msg, args);
 	}
@@ -445,50 +461,11 @@ public class Window extends Widget implements DTarget {
 	if(dm != null) {
 	    dm.remove();
 	    dm = null;
-		preventDraggingOutside();
 	} else {
 	    super.mouseup(c, button);
 	}
 	return(true);
     }
-
-	public void preventDraggingOutside() {
-		if (ui != null && ui.gui != null && !(this instanceof MapWnd)) {
-			if (this.csz().x > 800 || this.csz().y > 500 || !OptWnd.enableSnapWindowsBackInsideCheckBox.a) {
-				if (this.c.x < - UI.scale(14) - (int)(this.csz().x/1.333))
-					this.c.x = - UI.scale(14) - (int)(this.csz().x/1.333);
-				if (this.c.y < - UI.scale(14) - (int)(this.csz().y/1.333))
-					this.c.y = - UI.scale(14) - (int)(this.csz().y/1.333);
-				if (this.large) {
-					if (this.c.x > (ui.gui.sz.x - (int)(this.csz().x*0.25) - UI.scale(68)))
-						this.c.x = ui.gui.sz.x - (int)(this.csz().x*0.25) - UI.scale(68);
-					if (this.c.y > (ui.gui.sz.y - (int)(this.csz().y*0.25) - UI.scale(62)))
-						this.c.y = ui.gui.sz.y - (int)(this.csz().y*0.25) - UI.scale(62);
-				} else {
-					if (this.c.x > (ui.gui.sz.x - (int)(this.csz().x*0.25) - UI.scale(40)))
-						this.c.x = ui.gui.sz.x - (int)(this.csz().x*0.25) - UI.scale(40);
-					if (this.c.y > (ui.gui.sz.y - (int)(this.csz().y*0.25) - UI.scale(52)))
-						this.c.y = ui.gui.sz.y - (int)(this.csz().y*0.25) - UI.scale(52);
-				}
-			} else {
-				if (this.c.x < -UI.scale(14))
-					this.c.x = -UI.scale(14);
-				if (this.c.y < -UI.scale(14))
-					this.c.y = -UI.scale(14);
-				if (this.large) {
-					if (this.c.x > (ui.gui.sz.x - this.csz().x - UI.scale(68)))
-						this.c.x = ui.gui.sz.x - this.csz().x - UI.scale(68);
-					if (this.c.y > (ui.gui.sz.y - this.csz().y - UI.scale(62)))
-						this.c.y = ui.gui.sz.y - this.csz().y - UI.scale(62);
-				} else {
-					if (this.c.x > (ui.gui.sz.x - this.csz().x - UI.scale(40)))
-						this.c.x = ui.gui.sz.x - this.csz().x - UI.scale(40);
-					if (this.c.y > (ui.gui.sz.y - this.csz().y - UI.scale(52)))
-						this.c.y = ui.gui.sz.y - this.csz().y - UI.scale(52);
-				}
-			}
-		}
-	}
 
     public void mousemove(Coord c) {
 	if(dm != null) {
@@ -507,7 +484,7 @@ public class Window extends Widget implements DTarget {
 	if(super.keydown(ev))
 	    return(true);
 	if(key_esc.match(ev)) {
-	    wdgmsg("close");
+	    reqclose();
 	    return(true);
 	}
 	return(false);
@@ -533,6 +510,189 @@ public class Window extends Widget implements DTarget {
 	    return(ret);
 	else
 	    return("");
+    }
+
+    public void reqclose() {
+	wdgmsg("close");
+    }
+
+    public static interface Animation {
+	public boolean tick(double dt);
+	public void draw(GOut g, Tex tex);
+    }
+
+    public static interface Transition<S extends Animation, H extends Animation> {
+	public S show(Window wnd, H hiding);
+	public H hide(Window wnd, S showing);
+    }
+
+    private Transition<?, ?> trans = null;
+    private Animation anim = null;
+    private String animst = null;
+    public void tick(double dt) {
+	super.tick(dt);
+	if(anim != null) {
+	    if(anim.tick(dt)) {
+		if(animst == "show") {
+		} else if(animst == "hide") {
+		    super.hide();
+		} else if(animst == "dest") {
+		    destroy();
+		} else {
+		    throw(new AssertionError(animst));
+		}
+		anim = null;
+		animst = null;
+	    }
+	}
+    }
+
+    @SuppressWarnings("unchecked")
+    private <H extends Animation> Animation show0(Transition<?, H> trans, Animation h) {
+	return(trans.show(this, (H)h));
+    }
+    @SuppressWarnings("unchecked")
+    private <S extends Animation> Animation hide0(Transition<S, ?> trans, Animation s) {
+	return(trans.hide(this, (S)s));
+    }
+
+    public void settrans(Transition<?, ?> trans) {
+	if(this.anim != null)
+	    throw(new IllegalStateException(String.valueOf(this.anim)));
+	this.trans = trans;
+    }
+
+    public boolean visible() {
+	return(visible && ((animst == null) || (animst == "show")));
+    }
+
+    private void initanim() {
+	if(trans == null)
+	    trans = deftrans();
+	if(visible) {
+	    anim = trans.show(this, null);
+	    animst = "show";
+	}
+    }
+
+    public void show() {
+	if(parent == null) {
+	    super.show();
+	    return;
+	}
+	if(!visible)
+	    super.show();
+	if(animst == null) {
+	    anim = trans.show(this, null);
+	    animst = "show";
+	} else if(animst == "show") {
+	} else if(animst == "hide") {
+	    anim = show0(trans, anim);
+	    animst = "show";
+	} else if(animst == "dest") {
+	} else {
+	    throw(new AssertionError(animst));
+	}
+    }
+
+    public void hide() {
+	if(parent == null) {
+	    super.hide();
+	    return;
+	}
+	if(animst == null) {
+	    anim = trans.hide(this, null);
+	    animst = "hide";
+	} else if(animst == "show") {
+	    anim = hide0(trans, anim);
+	    animst = "hide";
+	} else if(animst == "hide") {
+	} else if(animst == "dest") {
+	} else {
+	    throw(new AssertionError(animst));
+	}
+    }
+
+    public void reqdestroy() {
+	if(parent == null) {
+	    super.reqdestroy();
+	    return;
+	}
+	if(animst == null) {
+	    anim = trans.hide(this, null);
+	    animst = "dest";
+	} else if(animst == "show") {
+	    anim = hide0(trans, anim);
+	    animst = "dest";
+	} else if(animst == "hide") {
+	    animst = "dest";
+	} else if(animst == "dest") {
+	} else {
+	    throw(new AssertionError(animst));
+	}
+    }
+
+    public static class NilAnim implements Animation {
+	public boolean tick(double dt) {return(true);}
+	public void draw(GOut g, Tex tex) {g.image(tex, Coord.z);}
+    }
+
+    public static final Transition<?, ?> niltrans = new Transition<Animation, Animation>() {
+	    public NilAnim show(Window wnd, Animation hide) {return(new NilAnim());}
+	    public NilAnim hide(Window wnd, Animation show) {return(new NilAnim());}
+	};
+
+    public abstract static class NormAnim implements Animation {
+	public final double s;
+	public final boolean rev;
+	public double a = 0.0, na = 0.0;
+
+	public NormAnim(double t, double fromn, boolean rev) {
+	    this.s = 1.0 / t;
+	    this.na = fromn;
+	    this.rev = rev;
+	    this.a = (rev ? (1.0 - fromn) : fromn) * t;
+	}
+	public NormAnim(double t, NormAnim from, boolean rev) {
+	    this(t, (from == null) ? (rev ? 1.0 : 0.0) : from.na, rev);
+	}
+	public NormAnim(double t) {this(t, 0.0, false);}
+
+	public boolean tick(double dt) {
+	    a += dt;
+	    double na = Math.min(a * s, 1.0);
+	    stick(this.na = rev ? (1.0 - na) : na);
+	    return(na >= 1.0);
+	}
+
+	public void stick(double a) {}
+    }
+
+    public static class FadeAnim extends NormAnim {
+	public static final double minfac = 0.1;
+	public static final double time = 0.1;
+
+	public FadeAnim(boolean hide, FadeAnim from) {
+	    super(time, from, hide);
+	}
+
+	public void draw(GOut g, Tex tex) {
+	    double na = Utils.smoothstep(this.na);
+	    g.chcolor(255, 255, 255, (int)(na * 255));
+	    Coord sz = tex.sz();
+	    double fac = minfac * (1.0 - na);
+	    g.image(tex, Coord.of((int)(sz.x * fac), (int)(sz.y * fac)),
+		    Coord.of((int)(sz.x * (1.0 - (fac * 2))), (int)(sz.y * (1.0 - (fac * 2)))));
+	}
+
+	public static final Transition<?, ?> trans = new Transition<FadeAnim, FadeAnim>() {
+		public FadeAnim show(Window wnd, FadeAnim hide) {return(new FadeAnim(false, hide));}
+		public FadeAnim hide(Window wnd, FadeAnim show) {return(new FadeAnim(true,  show));}
+	    };
+    }
+
+    protected Transition<?, ?> deftrans() {
+	return(FadeAnim.trans);
     }
 
     public static void main(String[] args) {

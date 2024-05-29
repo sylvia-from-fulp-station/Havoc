@@ -26,36 +26,27 @@
 
 package haven;
 
-import haven.MCache.OverlayInfo;
-import haven.automated.MiningSafetyAssistant;
-import haven.automated.helpers.AreaSelectCallback;
-import haven.automated.pathfinder.PFListener;
-import haven.automated.pathfinder.Pathfinder;
-import haven.render.*;
-import haven.render.sl.Type;
-import haven.render.sl.Uniform;
-
-import java.awt.*;
-import java.awt.event.KeyEvent;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.util.List;
-import java.util.*;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
-
+import static haven.MCache.cmaps;
 import static haven.MCache.tilesz;
 import static haven.OCache.posres;
+import java.awt.Color;
+import java.awt.event.KeyEvent;
+import java.util.*;
+import java.util.function.*;
+import java.lang.ref.*;
+import java.lang.reflect.*;
+import haven.render.*;
+import haven.MCache.OverlayInfo;
+import haven.render.sl.Uniform;
+import haven.render.sl.Type;
 
-public class MapView extends PView implements DTarget, Console.Directory, PFListener {
+public class MapView extends PView implements DTarget, Console.Directory {
     public static boolean clickdb = false;
     public long plgob = -1;
     public Coord2d cc;
-    public final Glob glob;
+    private final Glob glob;
     private int view = 2;
     private Collection<Delayed> delayed = new LinkedList<Delayed>();
-	private Collection<DelayedB> delayedB = new LinkedList<DelayedB>();
     private Collection<Delayed> delayed2 = new LinkedList<Delayed>();
     public Camera camera = restorecam();
     private Loader.Future<Plob> placing = null;
@@ -66,30 +57,10 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
     public static double plobpgran = Utils.getprefd("plobpgran", 8);
     public static double plobagran = Utils.getprefd("plobagran", 12);
     private static final Map<String, Class<? extends Camera>> camtypes = new HashMap<String, Class<? extends Camera>>();
-	private static final int MAX_TILE_RANGE = 40;
-
-	private long lastmmhittest = System.currentTimeMillis();
-	private Coord lasthittestc = Coord.z;
-
-	private AreaSelectCallback areaSelectCallback;
-	public boolean areaSelect = false;
-
-	public final PartyHighlight partyHighlight;
-	public final PartyCircles partyCircles;
-
-	public Pathfinder pf;
-	public Thread pfthread;
-	public CheckpointManager checkpointManager;
-	public Thread checkpointManagerThread;
-
-
-	public interface Delayed {
+    
+    public interface Delayed {
 	public void run(GOut g);
     }
-
-	public interface DelayedB {
-		public void run();
-	}
 
     public interface Grabber {
 	boolean mmousedown(Coord mc, int button);
@@ -97,10 +68,6 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	boolean mmousewheel(Coord mc, int amount);
 	void mmousemove(Coord mc);
     }
-
-	private enum Direction {
-		WEST, EAST, NORTH, SOUTH
-	}
 
     public abstract class Camera implements Pipe.Op {
 	protected haven.render.Camera view = new haven.render.Camera(Matrix4f.identity());
@@ -122,13 +89,11 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	public boolean wheel(Coord sc, int amount) {
 	    return(false);
 	}
-
-	public void snap(Direction dir) {}
 	
 	public void resized() {
 	    float field = 0.5f;
 	    float aspect = ((float)sz.y) / ((float)sz.x);
-	    proj = Projection.frustum(-field, field, -aspect * field, aspect * field, 1, 5000); // ND: Changed this from 2000 to 5000. This is the max free cam distance, before it turns black.
+	    proj = Projection.frustum(-field, field, -aspect * field, aspect * field, 1, 2000);
 	}
 
 	public void apply(Pipe p) {
@@ -348,8 +313,8 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	public boolean exact = true;
 	protected float dist = 500.0f;
 	protected float elev = (float)Math.PI / 6.0f;
-	protected float angl = (float) (3 * Math.PI / 2);
-	protected float field = (float)(200 * Math.sqrt(2));
+	protected float angl = -(float)Math.PI / 4.0f;
+	protected float field = (float)(100 * Math.sqrt(2));
 	private Coord dragorig = null;
 	private float anglorig;
 	protected Coord3f cc, jc;
@@ -396,14 +361,11 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	}
     }
 
-    public static KeyBinding kb_camleft  = KeyBinding.get("cam-left",  KeyMatch.nil);
-    public static KeyBinding kb_camright = KeyBinding.get("cam-right", KeyMatch.nil);
-    public static KeyBinding kb_camin    = KeyBinding.get("cam-in",    KeyMatch.nil);
-    public static KeyBinding kb_camout   = KeyBinding.get("cam-out",   KeyMatch.nil);
-	public static KeyBinding kb_camSnapNorth = KeyBinding.get("cam-SnapNorth", KeyMatch.forcode(KeyEvent.VK_UP, 0));
-	public static KeyBinding kb_camSnapSouth = KeyBinding.get("cam-SnapSouth", KeyMatch.forcode(KeyEvent.VK_DOWN, 0));
-	public static KeyBinding kb_camSnapEast = KeyBinding.get("cam-SnapEast", KeyMatch.forcode(KeyEvent.VK_RIGHT, 0));
-	public static KeyBinding kb_camSnapWest = KeyBinding.get("cam-SnapWest", KeyMatch.forcode(KeyEvent.VK_LEFT, 0));
+    public static KeyBinding kb_camleft  = KeyBinding.get("cam-left",  KeyMatch.forcode(KeyEvent.VK_LEFT, 0));
+    public static KeyBinding kb_camright = KeyBinding.get("cam-right", KeyMatch.forcode(KeyEvent.VK_RIGHT, 0));
+    public static KeyBinding kb_camin    = KeyBinding.get("cam-in",    KeyMatch.forcode(KeyEvent.VK_UP, 0));
+    public static KeyBinding kb_camout   = KeyBinding.get("cam-out",   KeyMatch.forcode(KeyEvent.VK_DOWN, 0));
+    public static KeyBinding kb_camreset = KeyBinding.get("cam-reset", KeyMatch.forcode(KeyEvent.VK_HOME, 0));
     public class SOrthoCam extends OrthoCam {
 	private Coord dragorig = null;
 	private float anglorig;
@@ -503,258 +465,15 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	    } else if(kb_camout.key().match(ev)) {
 		chfield(tfield + 50);
 		return(true);
+	    } else if(kb_camreset.key().match(ev)) {
+		tangl = angl + (float)Utils.cangle(-(float)Math.PI * 0.25f - angl);
+		chfield((float)(100 * Math.sqrt(2)));
+		return(true);
 	    }
 	    return(false);
 	}
     }
     static {camtypes.put("ortho", SOrthoCam.class);}
-
-	public static int orthoCameraAxisReverter = 1;
-	public static void NDrevertOrthoAxis(boolean reverted){
-		if (reverted) orthoCameraAxisReverter = -1;
-		else orthoCameraAxisReverter = 1;
-	}
-	public static int freeCamXAxisReverter = 1;
-	public static void NDrevertfreeCamXAxis(boolean reverted){
-		if (reverted) freeCamXAxisReverter = -1;
-		else freeCamXAxisReverter = 1;
-	}
-	public static int freeCamYAxisReverter = 1;
-	public static void NDrevertfreeCamYAxis(boolean reverted){
-		if (reverted) freeCamYAxisReverter = -1;
-		else freeCamYAxisReverter = 1;
-	}
-	public static float publicFreeCamDist = 500.0f;
-	public static int publicCurrentCameraName = 1;
-	public static float freeCamAngle = (float)Math.PI / 4.0f;
-	public class NDFreeCam extends FreeCam {
-		private float dist = 500.0f, tdist = dist;
-		private float elev = (float)Math.PI / 4.0f, telev = elev;
-		private float angl = (float) (3 * Math.PI / 2), tangl = angl;
-		private Coord dragorig = null;
-		private float elevorig, anglorig;
-		private final float pi2 = (float)(Math.PI * 2);
-		private Coord3f cc = null;
-
-		public void tick(double dt) {
-			float cf = (1f - (float)Math.pow(500, -dt * 3));
-			angl = angl + ((tangl - angl) * cf);
-			while(angl > pi2) {angl -= pi2; tangl -= pi2; anglorig -= pi2;}
-			while(angl < 0)   {angl += pi2; tangl += pi2; anglorig += pi2;}
-			if(Math.abs(tangl - angl) < 0.0001) angl = tangl;
-
-			elev = elev + ((telev - elev) * cf);
-			if(Math.abs(telev - elev) < 0.0001) elev = telev;
-
-			dist = dist + ((tdist - dist) * cf);
-			if (dist > 4000) tdist = dist = 4000;
-			if(Math.abs(tdist - dist) < 0.0001) dist = tdist;
-
-			Coord3f mc = getcc();
-			mc.y = -mc.y;
-			if((cc == null) || (Math.hypot(mc.x - cc.x, mc.y - cc.y) > 250))
-				cc = mc;
-			else
-				cc = cc.add(mc.sub(cc).mul(cf));
-			view = haven.render.Camera.pointed(cc.add(0.0f, 0.0f, (float) OptWnd.freeCamHeightSlider.val/10), dist, elev, angl);
-		}
-
-		public float angle() {
-			return(angl);
-		}
-
-		public boolean click(Coord c) {
-			elevorig = elev;
-			anglorig = angl;
-			dragorig = c;
-			return(true);
-		}
-
-		public void drag(Coord c) {
-			telev = elevorig - freeCamYAxisReverter * ((float)(c.y - dragorig.y) / 100.0f);
-			if (OptWnd.allowLowerFreeCamTiltCheckBox.a){
-				if(telev < -0.5f) telev = -0.5f;
-			}
-			else {
-				if(telev < 0.0f) telev = 0.0f;
-			}
-			if(telev > (Math.PI / 2.0)) telev = (float)Math.PI / 2.0f;
-			freeCamAngle = telev;
-			tangl = anglorig + freeCamXAxisReverter * ((float)(c.x - dragorig.x) / 100.0f);
-		}
-
-		public boolean wheel(Coord c, int amount) {
-			float d = tdist + (amount * OptWnd.freeCamZoomSpeedSlider.val);
-			if(d < 10)
-				d = 10;
-			tdist = d;
-			publicFreeCamDist = d;
-			return(true);
-		}
-
-		@Override
-		public void snap(Direction dir) {
-			switch (dir) {
-				case WEST:
-					tangl = (float) (2 * Math.PI);
-					break;
-				case EAST:
-					tangl = (float) Math.PI;
-					break;
-				case NORTH:
-					tangl = (float) (3 * Math.PI / 2);
-					break;
-				case SOUTH:
-					tangl = (float) (Math.PI / 2);
-					break;
-			}
-		}
-
-		public boolean keydown(KeyEvent ev) {
-			if(kb_camSnapNorth.key().match(ev)) {
-				snapCameraNorth();
-				return(true);
-			} else if(kb_camSnapSouth.key().match(ev)) {
-				snapCameraSouth();
-				return(true);
-			} else if(kb_camSnapEast.key().match(ev)) {
-				snapCameraEast();
-				return(true);
-			} else if(kb_camSnapWest.key().match(ev)) {
-				snapCameraWest();
-				return (true);
-			}
-			return(false);
-		}
-	}
-	static {camtypes.put("NDFree", NDFreeCam.class);}
-
-	public static float publicOrthoCamDist = 150f;
-
-	public class NDSOrthoCam extends SOrthoCam {
-		private Coord dragorig = null;
-		private float anglorig;
-		private float tangl = angl;
-		private float tfield = field;
-		//private boolean isometric = false;
-		private final float pi2 = (float)(Math.PI * 2);
-		private double tf = 2.0;
-
-		public NDSOrthoCam(String... args) {
-			PosixArgs opt = PosixArgs.getopt(args, "enift:Z:");
-			for(char c : opt.parsed()) {
-				switch(c) {
-					case 'e':
-						exact = true;
-						break;
-					case 'n':
-						exact = false;
-						break;
-					case 'i':
-						//isometric = true;
-						break;
-					case 'f':
-						//isometric = false;
-						break;
-					case 't':
-						tf = Double.parseDouble(opt.arg);
-						break;
-					case 'Z':
-						field = tfield = Float.parseFloat(opt.arg);
-						break;
-				}
-			}
-		}
-
-		public void tick2(double dt) {
-			dt *= tf;
-			float cf = 1f - (float)Math.pow(500, -dt);
-			Coord3f mc = getcc();
-			mc.y = -mc.y;
-			if((cc == null) || (Math.hypot(mc.x - cc.x, mc.y - cc.y) > 250))
-				cc = mc;
-			else if(!exact || (mc.dist(cc) > 2))
-				cc = cc.add(mc.sub(cc).mul(cf));
-
-			angl = angl + ((tangl - angl) * cf);
-			while(angl > pi2) {angl -= pi2; tangl -= pi2; anglorig -= pi2;}
-			while(angl < 0)   {angl += pi2; tangl += pi2; anglorig += pi2;}
-			if(Math.abs(tangl - angl) < 0.001)
-				angl = tangl;
-			else
-				jc = cc;
-
-			field = field + ((tfield - field) * cf);
-			if(Math.abs(tfield - field) < 0.1)
-				field = tfield;
-			else
-				jc = cc;
-		}
-
-		public boolean click(Coord c) {
-			anglorig = angl;
-			dragorig = c;
-			return(true);
-		}
-
-		public void drag(Coord c) {
-			tangl = anglorig + orthoCameraAxisReverter * ((float)(c.x - dragorig.x) / 100.0f);
-		}
-
-		public void release() {
-			if(!OptWnd.unlockedOrthoCamCheckBox.a && (tfield > 100))
-				tangl = (float)(Math.PI * 0.5 * (Math.floor(tangl / (Math.PI * 0.5)) + 0.5));
-		}
-
-		private void chfield(float nf) {
-			tfield = nf;
-			tfield = Math.max(Math.min(tfield, sz.x * (float)Math.sqrt(2) / 2f), 10); // ND: changed "8f" to "2f" to increase the zoom out distance limit
-			if(tfield > 100)
-				release();
-			publicOrthoCamDist = tfield;
-		}
-
-		public boolean wheel(Coord c, int amount) {
-			chfield(tfield + amount * OptWnd.orthoCamZoomSpeedSlider.val);
-			return(true);
-		}
-
-		@Override
-		public void snap(Direction dir) {
-			switch (dir) {
-				case WEST:
-					tangl = (float) (2 * Math.PI);
-					break;
-				case EAST:
-					tangl = (float) Math.PI;
-					break;
-				case NORTH:
-					tangl = (float) (3 * Math.PI / 2);
-					break;
-				case SOUTH:
-					tangl = (float) (Math.PI / 2);
-					break;
-			}
-		}
-
-		public boolean keydown(KeyEvent ev) {
-			if(kb_camSnapNorth.key().match(ev)) {
-				snapCameraNorth();
-				return(true);
-			} else if(kb_camSnapSouth.key().match(ev)) {
-				snapCameraSouth();
-				return(true);
-			} else if(kb_camSnapEast.key().match(ev)) {
-				snapCameraEast();
-				return(true);
-			} else if(kb_camSnapWest.key().match(ev)) {
-				snapCameraWest();
-				return (true);
-			}
-			return(false);
-		}
-	}
-	static {camtypes.put("NDOrtho", NDSOrthoCam.class);}
 
     @RName("mapview")
     public static class $_ implements Factory {
@@ -763,7 +482,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	    Coord2d mc = ((Coord)args[1]).mul(posres);
 	    long pgob = -1;
 	    if(args.length > 2)
-		pgob = Utils.uint32((Integer)args[2]);
+		pgob = Utils.uiv(args[2]);
 	    return(new MapView(sz, ui.sess.glob, mc, pgob));
 	}
     }
@@ -773,26 +492,13 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	this.glob = glob;
 	this.cc = cc;
 	this.plgob = plgob;
-	try {
-		glob.oc.getgob(plgob).delattr(KinInfo.class); // ND: This is only needed for Valhalla. That's the only time plgob seems to change while you're playing. I guess it will work anytime anyway.
-	} catch (NullPointerException ignored){}
 	basic.add(new Outlines(false));
 	basic.add(this.gobs = new Gobs());
 	basic.add(this.terrain = new Terrain());
 	this.clickmap = new ClickMap();
 	clmaptree.add(clickmap);
 	setcanfocus(true);
-	if (OptWnd.toggleGobCollisionBoxesDisplayCheckBox.a) updatePlobDrawable();
-	if (OptWnd.toggleGobHidingCheckBox.a) updatePlobDrawable();
-	this.partyHighlight = new PartyHighlight(glob.party, plgob);
-	this.partyCircles = new PartyCircles(glob.party, plgob);
     }
-
-	public void updatePlobDrawable() {
-		if(placing != null && placing.done()) {
-			placing.get().drawableUpdated();
-		}
-	}
     
     protected void envdispose() {
 	if(smap != null) {
@@ -1315,8 +1021,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
     private void amblight() {
 	synchronized(glob) {
 	    if(glob.lightamb != null) {
-		//amblight = new DirLight(glob.lightamb, glob.lightdif, glob.lightspc, Coord3f.o.sadd((float)glob.lightelev, (float)glob.lightang, 1f));
-		amblight = new DirLight(glob.blightamb, glob.blightdif, glob.blightspc, Coord3f.o.sadd((float)glob.lightelev, (float)glob.lightang, 1f));// ND: change for night mode
+		amblight = new DirLight(glob.lightamb, glob.lightdif, glob.lightspc, Coord3f.o.sadd((float)glob.lightelev, (float)glob.lightang, 1f));
 		amblight.prio(100);
 	    } else {
 		amblight = null;
@@ -1787,19 +1492,6 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	}
     }
 
-	public void delayB(DelayedB d) {
-		synchronized(delayedB) {
-			delayedB.add(d);
-		}
-	}
-	protected void undelayB(Collection<DelayedB> list) {
-		synchronized(list) {
-			for(DelayedB d : list)
-				d.run();
-			list.clear();
-		}
-	}
-
     static class PolText {
 	Text text; double tm;
 	PolText(Text text, double tm) {this.text = text; this.tm = tm;}
@@ -1936,7 +1628,6 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	    if(camload != null)
 		throw(new Loading(camload));
 	    undelay(delayed, g);
-		undelayB(delayedB);
 	    super.draw(g);
 	    undelay(delayed2, g);
 	    poldraw(g);
@@ -1990,7 +1681,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	basic(Camera.class, camera);
 	amblight();
 	updsmap(amblight);
-	if (!OptWnd.disableWeatherEffectsCheckBox.a) updweather();
+	updweather();
 	synchronized(glob.map) {
 	    terrain.tick();
 	    oltick();
@@ -1998,11 +1689,12 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 		gridlines.tick();
 	    clickmap.tick();
 	}
-	partyHighlight.update();
-	partyCircles.update();
 	Loader.Future<Plob> placing = this.placing;
 	if((placing != null) && placing.done()) {
-		placing.get().ctick(dt);
+	    Plob ob = placing.get();
+	    synchronized(ob) {
+		ob.ctick(dt);
+	    }
 	}
     }
     
@@ -2021,7 +1713,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 
 	public void adjust(Plob plob, Coord pc, Coord2d mc, int modflags) {
 	    Coord2d nc;
-	    if((modflags & UI.MOD_CTRL) == 0)
+	    if((modflags & UI.MOD_SHIFT) == 0)
 		nc = mc.floor(tilesz).mul(tilesz).add(tilesz.div(2));
 	    else if(plobpgran > 0)
 		nc = mc.div(tilesz).mul(plobpgran).roundf().div(plobpgran).mul(tilesz);
@@ -2035,11 +1727,11 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	}
 
 	public boolean rotate(Plob plob, int amount, int modflags) {
-		if((modflags & UI.MOD_SHIFT) == 0)
+	    if((modflags & (UI.MOD_CTRL | UI.MOD_SHIFT)) == 0)
 		return(false);
 	    freerot = true;
 	    double na;
-	    if((modflags & UI.MOD_CTRL) == 0)
+	    if((modflags & UI.MOD_SHIFT) == 0)
 		na = (Math.PI / 4) * Math.round((plob.a + (amount * Math.PI / 4)) / (Math.PI / 4));
 	    else
 		na = plob.a + amount * Math.PI / plobagran;
@@ -2055,7 +1747,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	RenderTree.Slot slot;
 
 	private Plob(Indir<Resource> res, Message sdt) {
-	    super(MapView.this.glob, MapView.this.cc);
+	    super(MapView.this.glob, Coord2d.of(getcc()));
 	    setattr(new ResDrawable(this, res, sdt));
 	}
 
@@ -2126,7 +1818,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 		this.placing = null;
 	    }
 	    int a = 0;
-	    Indir<Resource> res = ui.sess.getres((Integer)args[a++]);
+	    Indir<Resource> res = ui.sess.getresv(args[a++]);
 	    Message sdt;
 	    if((args.length > a) && (args[a] instanceof byte[]))
 		sdt = new MessageBuf((byte[])args[a++]);
@@ -2141,7 +1833,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 			    ret = new Plob(res, new MessageBuf(sdt));
 			while(a < args.length) {
 			    int a2 = a;
-			    Indir<Resource> ores = ui.sess.getres((Integer)args[a2++]);
+			    Indir<Resource> ores = ui.sess.getresv(args[a2++]);
 			    Message odt;
 			    if((args.length > a2) && (args[a2] instanceof byte[]))
 				odt = new MessageBuf((byte[])args[a2++]);
@@ -2171,15 +1863,15 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	    if(args[0] == null)
 		plgob = -1;
 	    else
-		plgob = Utils.uint32((Integer)args[0]);
+		plgob = Utils.uiv(args[0]);
 	} else if(msg == "flashol2") {
 	    Collection<String> ols = new LinkedList<>();
-	    double tm = ((Number)args[0]).doubleValue() / 100.0;
+	    double tm = Utils.dv(args[0]) / 100.0;
 	    for(int a = 1; a < args.length; a++)
 		ols.add((String)args[a]);
 	    flashol(ols, tm);
 	} else if(msg == "sel") {
-	    boolean sel = ((Integer)args[0]) != 0;
+	    boolean sel = Utils.bv(args[0]);
 	    synchronized(this) {
 		if(sel && (selection == null)) {
 		    selection = new Selector();
@@ -2189,7 +1881,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 		}
 	    }
 	} else if(msg == "shake") {
-	    shake += ((Number)args[0]).doubleValue();
+	    shake += Utils.dv(args[0]);
 	} else {
 	    super.uimsg(msg, args);
 	}
@@ -2226,7 +1918,7 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	protected void nohit(Coord pc) {}
     }
 
-    public abstract class Hittest implements DelayedB {
+    public abstract class Hittest {
 	private final Coord pc;
 	private Coord2d mapcl;
 	private ClickData objcl;
@@ -2280,116 +1972,12 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	    super(c);
 	    clickb = b;
 	}
-
+	
 	protected void hit(Coord pc, Coord2d mc, ClickData inf) {
-		GameUI gui = ui.gui;
-		// reset alt so we could walk with alt+lmb while having item on the cursor
-		int modflags = ui.modflags();
-		if (gui != null && gui.vhand != null && clickb == 1)
-			modflags = modflags & ~4;
-
-	    Object[] args = {pc, mc.floor(posres), clickb, modflags};
-	    if(inf != null) {
-			args = Utils.extend(args, inf.clickargs());
-			Long gobid = new Long((Integer) inf.clickargs()[1]);
-			Gob gob = glob.oc.getgob(gobid);
-			if(gob != null) {
-				if(ui.isCursor("gfx/hud/curs/study") && clickb == 1) {
-					ui.gui.setDetectGob(gob);
-				}
-				if (ui.modmeta && gui.vhand == null) {
-					Map<String, ChatUI.MultiChat> chats = gui.chat.getMultiChannels();
-					if (clickb == 1 && (!ui.modshift || !ui.modctrl)) {
-						chats.get("Area Chat").send("@" + gob.id);
-					} else if (clickb == 3 && (!ui.modshift || !ui.modctrl)) {
-						if (chats.get("Party") != null)
-							chats.get("Party").send("@" + gob.id);
-					}
-					if(OptWnd.objectPermanentHighlightingCheckBox.a && clickb == 2 && (ui.modmeta && !(ui.modshift || ui.modctrl))){
-						if (Gob.listHighlighted.contains(gob.id)) {
-							Gob.listHighlighted.remove(gob.id);
-							gob.delattr(GobPermanentHighlight.class);
-						} else {
-							Gob.listHighlighted.add(gob.id);
-							gob.setattr(new GobPermanentHighlight(gob, GobPermanentHighlight.State.PURPLE));
-						}
-					}
-					return;
-				} else {
-					if (clickb == 3) {
-						if (OptWnd.autoswitchBunnyPlateBootsCheckBox.a) {
-							try {
-								WItem eqboots = gui.getequipory().slots[Equipory.SLOTS.BOOTS.idx];
-								List<WItem> invboots;
-								if (gob.getres().name.contains("/rabbit/")) {
-									invboots = gui.maininv.getItemsExact("Bunny Slippers");
-									if (invboots.size() > 0) {
-										if (eqboots != null && !eqboots.item.getname().equals("Bunny Slippers")) {
-											eqboots.item.wdgmsg("transfer", new Coord(eqboots.sz.x / 2, eqboots.sz.y / 2));
-										}
-										WItem slipper = invboots.get(0);
-										slipper.item.wdgmsg("transfer", new Coord(slipper.sz.x / 2, slipper.sz.y / 2));
-									}
-								} else {
-									invboots = gui.maininv.getItemsExact("Plate Boots");
-									if (eqboots != null && eqboots.item.getname().equals("Bunny Slippers")) {
-										if (invboots.size() > 0) {
-											eqboots.item.wdgmsg("transfer", new Coord(eqboots.sz.x / 2, eqboots.sz.y / 2));
-											WItem boots = invboots.get(0);
-											boots.item.wdgmsg("transfer", new Coord(boots.sz.x / 2, boots.sz.y / 2));
-										}
-									}
-								}
-							} catch (Exception ignored) {
-							}
-						}
-						wdgmsg("click", args);
-						if (OptWnd.instantFlowerMenuCTRLCheckBox.a) {
-							if (ui.modctrl) {
-								ui.gui.ui.rcvr.rcvmsg(ui.gui.ui.lastid + 1, "cl", 0, ui.gui.ui.modflags());
-							}
-						}
-						return;
-					}
-					if(!GameUI.walkWithPathfinder){
-						wdgmsg("click", args);
-					} else {
-						pfLeftClick(mc.floor(), null);
-					}
-					return;
-				}
-			}
-		} else {
-			if (clickb == 1 && ui.modmeta && gui.vhand == null) {
-				addCheckpoint(mc);
-			} else if(clickb == 1) {
-				if (gui.fv != null)
-					gui.fv.currentChanged = false;
-				if (OptWnd.autoswitchBunnyPlateBootsCheckBox.a) {
-					try {
-						if (gui.getequipory() != null && gui.getequipory().slots != null) {
-							WItem eqboots = gui.getequipory().slots[Equipory.SLOTS.BOOTS.idx];
-							if (eqboots != null && eqboots.item.getname().equals("Bunny Slippers")) {
-								List<WItem> invboots = gui.maininv.getItemsExact("Plate Boots");
-								if (invboots.size() > 0) {
-									eqboots.item.wdgmsg("transfer", new Coord(eqboots.sz.x / 2, eqboots.sz.y / 2));
-									WItem boots = invboots.get(0);
-									boots.item.wdgmsg("transfer", new Coord(boots.sz.x / 2, boots.sz.y / 2));
-								}
-							}
-						}
-					} catch (Exception e) {}
-				}
-			}
-		}
-		if(checkpointManager != null && checkpointManagerThread != null && clickb == 1){
-			checkpointManager.pauseIt();
-		}
-		if(!GameUI.walkWithPathfinder){
-			wdgmsg("click", args);
-		} else {
-			pfLeftClick(mc.floor(), null);
-		}
+	    Object[] args = {pc, mc.floor(posres), clickb, ui.modflags()};
+	    if(inf != null)
+		args = Utils.extend(args, inf.clickargs());
+	    wdgmsg("click", args);
 	}
     }
     
@@ -2405,36 +1993,14 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
     public boolean mousedown(Coord c, int button) {
 	parent.setfocus(this);
 	Loader.Future<Plob> placing_l = this.placing;
-	if (button == 1 && areaSelect) {
-		synchronized (this) {
-			if (selection == null) {
-				selection = new Selector();
-			} else {
-				selection.destroy();
-				selection = null;
-				areaSelect = false;
-			}
-		}
-	}
 	if(button == 2) {
-		new Click(c, button).run();
 	    if(((Camera)camera).click(c)) {
 		camdrag = ui.grabmouse(this);
 	    }
 	} else if((placing_l != null) && placing_l.done()) {
 	    Plob placing = placing_l.get();
-	    if(placing.lastmc != null) {
-			int modflags = ui.modflags(); // ND: These are the "mod" buttons you're holding down: CTRL, SHIFT, ALT, and god knows wtf "modsuper" means.
-			// ND: Loftar checks on the serverside if we're holding CTRL while placing an item, which causes us to walk to that position if we do.
-			// ND: I'm doing the following to switch that with ALT instead, by switching the information we send to the server.
-			// ND: "2" is the value of "modctrl"
-			if (ui.modctrl && !ui.modmeta) { // ND: Only extract this if we're holding CTRL while also not holding ALT
-				modflags = modflags - 2;
-			} else if (ui.modmeta && !ui.modctrl) { // ND: But also add it if we're holding ALT but not holding CTRL
-				modflags = modflags + 2;
-			}
-			wdgmsg("place", placing.rc.floor(posres), (int) Math.round(placing.a * 32768 / Math.PI), button, modflags);
-		}
+	    if(placing.lastmc != null)
+		wdgmsg("place", placing.rc.floor(posres), (int)Math.round(placing.a * 32768 / Math.PI), button, ui.modflags());
 	} else if((grab != null) && grab.mmousedown(c, button)) {
 	} else {
 	    new Click(c, button).run();
@@ -2453,141 +2019,6 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 	    if((placing.lastmc == null) || !placing.lastmc.equals(c)) {
 		placing.new Adjust(c, ui.modflags()).run();
 	    }
-	}  else if (ui.modshift && ui.modctrl) {
-		long now = System.currentTimeMillis();
-		if ((now - lastmmhittest > 500 || lasthittestc.dist(c) > tilesz.x) && ui.gui.hand.isEmpty()) {
-			lastmmhittest = now;
-			lasthittestc = c;
-
-			delayB(new Hittest(c) {
-				@Override
-				protected void hit(Coord pc, Coord2d mc, ClickData inf) {
-					if (inf != null) {
-						Long gobid = new Long((Integer) inf.clickargs()[1]);
-						Gob gob = glob.oc.getgob(gobid);
-						if (gob != null) {
-							try {
-								Resource res = gob.getres();
-
-								String ols = null;
-								String ols2 = null;
-								String poses = null;
-								String gattrs = null;
-								String equip = null;
-								String peekrbuf = null;
-								String plantinfo = null;
-								try {
-									ols = gob.ols.stream()
-											.map(ol -> {
-												if (ol.res != null) {
-													return ol.res.get().name;
-												} else {
-													return null;
-												}
-											})
-											.filter(Objects::nonNull)
-											.collect(Collectors.joining(", "));
-								} catch (Exception ignored) {}
-								try {
-									ols2 = gob.ols.stream().map(ol -> {
-										try {
-											if (ol.sdt != null)
-												return glob.sess.getres(haven.Utils.uint16d(ol.sdt.rbuf, 0)).get().basename()
-													+ " State: " + ol.sdt.peekrbuf(0);
-											else return null;
-										} catch(IndexOutOfBoundsException e) {
-											return "N/A";
-										}
-									})
-									.filter(Objects::nonNull)
-									.collect(Collectors.joining(", "));
-								} catch (Exception ignores) {}
-								try {
-									gattrs = gob.attr.keySet().stream().map(Class::getName).collect(Collectors.joining(", ")).replace("$", ".");
-								} catch (Exception ignored) { }
-								//Composites:
-								if (gob.isComposite) {
-									try {
-										if (gob.getattr(Drawable.class) != null) {
-											poses = ((Composite)gob.getattr(Drawable.class)).poses.stream().collect(Collectors.joining(", "));
-										}
-									} catch (Exception ignored) { }
-								}
-
-								for (GAttrib g : gob.attr.values()) {
-									if (g instanceof Drawable) {
-										if (g instanceof ResDrawable) {
-											ResDrawable resDrawable = gob.getattr(ResDrawable.class);
-												peekrbuf = "" + resDrawable.sdt.peekrbuf(0);
-
-										} else if (g instanceof Composite) {
-											Composite c = (Composite) g;
-											StringBuilder sb = new StringBuilder();
-											if (c.comp.cequ.size() > 0) {
-												sb.append("$col[255,200,0]{Wearing:} \n");
-												for (Composited.ED item : c.comp.cequ) {
-													sb.append("   "+item.res.res.get().basename()+" \n");
-												}
-											}
-											if (c.comp.cmod.size() > 0) {
-												sb.append("$col[255,200,0]{Mod:} \n");
-												for (Composited.MD item : c.comp.cmod) {
-													sb.append("   "+item.mod.get().basename()+" \n");
-												}
-											}
-											equip = sb.toString();
-										}
-									}
-								}
-								if (res != null) {
-									String tt;
-									if (OptWnd.enableAdvancedMouseInfoCheckBox.a)
-										tt = "Object Resource Path: " + "$col[255,200,0]{" + res.name + "}" +
-												" \nID: " + gob.id +
-												" \nRC: " + ui.sess.glob.map.getzp(gob.rc) +
-												String.format(" \nAngle: %.2f (%.2f\u00B0)", gob.a, 360.*(gob.a/(2.*Math.PI))) +
-												(ols != null ? " \nOls: $col[192,192,255]{" + ols + "}" : "") +
-												(ols2 != null ? " \nOls exp: $col[192,192,255]{" + ols2 + "}" : "") +
-												(poses != null ? " \nPoses: $col[192,192,255]{" + poses + "}" : "") +
-												(gattrs != null ? " \nGattrs: $col[192,192,255]{" + gattrs + "}" : "") +
-												(peekrbuf != null ? " \nPeekrbuf: $col[192,192,255]{" + peekrbuf + "}" : "") +
-												(equip != null ? " \n$col[255,255,192]{" + equip + "}" : "");
-									else
-										tt = "Object Resource Path: " + "$col[255,200,0]{" + res.name + "}";
-									tooltip = RichText.render(tt, 400);
-									return;
-								}
-							} catch (Loading e) {
-							}
-						}
-					} else {
-						try {
-							MCache map = ui.sess.glob.map;
-							int t = map.gettile(mc.floor(tilesz));
-							Resource res = map.tilesetr(t);
-							if (res != null) {
-								if (OptWnd.enableAdvancedMouseInfoCheckBox.a)
-									tooltip = RichText.render("Tile Resource Path: " + "$col[255,200,0]{" + res.name + "}" +
-											" \nMC: " + mc.floor(), UI.scale(400));
-								else
-									tooltip = RichText.render("Tile Resource Path: " + "$col[255,200,0]{" + res.name + "}", UI.scale(400));
-								return;
-							}
-						} catch (Loading ignored){
-						}
-					}
-					tooltip = null;
-				}
-
-				protected void nohit(Coord pc) {
-					if (OptWnd.enableAdvancedMouseInfoCheckBox.a)
-						System.out.println(pc);
-					tooltip = null;
-				}
-			});
-		}
-	} else if (tooltip != null) {
-		tooltip = null;
 	}
     }
     
@@ -2619,29 +2050,6 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
     public boolean drop(final Coord cc, Coord ul) {
 	new Hittest(cc) {
 	    public void hit(Coord pc, Coord2d mc, ClickData inf) {
-			if((OptWnd.noCursorItemDroppingCheckBox.a || OptWnd.noCursorItemDroppingInWaterCheckBox.a) && !ui.modctrl) {
-				boolean nodropping = false;
-				if (OptWnd.noCursorItemDroppingCheckBox.a) {
-					nodropping = true;
-				} else {
-					if (player() != null){
-						int t = glob.map.gettile(player().rc.floor(tilesz));
-						Resource res = glob.map.tilesetr(t);
-						if (res != null && (
-								res.name.equals("gfx/tiles/water")
-										|| res.name.equals("gfx/tiles/deep"))
-								|| res.name.equals("gfx/tiles/owater")
-								|| res.name.equals("gfx/tiles/odeep")
-								|| res.name.equals("gfx/tiles/odeeper")) {
-							nodropping = true;
-						}
-					}
-				}
-				if (nodropping) {
-					wdgmsg("click", pc, mc.floor(posres), 1, 0);
-					return;
-				}
-			}
 		wdgmsg("drop", pc, mc.floor(posres), ui.modflags());
 	    }
 	}.run();
@@ -2792,9 +2200,6 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 		    tt = null;
 		    ol.destroy();
 		    mgrab.remove();
-			if (areaSelectCallback != null) {
-				areaSelectCallback.areaselect(ol.a.ul, ol.a.br);
-			}
 		    wdgmsg("sel", sc, ec, modflags);
 		    sc = null;
 		}
@@ -2868,45 +2273,21 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 
     private Map<String, Console.Command> cmdmap = new TreeMap<String, Console.Command>();
     {
-		//ND: Change the "cam" console command. Console commands are stupid and not everyone knows of them, use the options menu instead.
-//	cmdmap.put("cam", new Console.Command() {
-//		public void run(Console cons, String[] args) throws Exception {
-//		    if(args.length >= 2) {
-//			Class<? extends Camera> ct = camtypes.get(args[1]);
-//			String[] cargs = AUtils.splice(args, 2);
-//			if(ct != null) {
-//				camera = makecam(ct, cargs);
-//				AUtils.setpref("defcam", args[1]);
-//				AUtils.setprefb("camargs", AUtils.serialize(cargs));
-//			} else {
-//			    throw(new Exception("no such camera: " + args[1]));
-//			}
-//		    }
-//		}
-//	    });
-
-		cmdmap.put("cam", new Console.Command() {
-			public void run(Console cons, String[] args) throws Exception {
-				if (OptWnd.cameraLmaoMessage == 1) {
-					OptWnd.cameraLmaoMessage = 2;
-					throw (new Exception("Please use the Options menu to change the camera instead."));
-				}
-				else if (OptWnd.cameraLmaoMessage == 2) {
-					OptWnd.cameraLmaoMessage = 3;
-					throw (new Exception("No. I said use the Options menu to change the camera!"));
-				}
-				else if (OptWnd.cameraLmaoMessage == 3) {
-					OptWnd.cameraLmaoMessage = 4;
-					throw (new Exception("USE THE FUCKING OPTIONS MENU TO CHANGE THE CAMERA!!!"));
-				}
-				else if (OptWnd.cameraLmaoMessage == 4) {
-					OptWnd.cameraLmaoMessage = 1;
-					throw (new Exception("I literally disabled this command in case you couldn't tell. Use the Options menu."));
-				}
+	cmdmap.put("cam", new Console.Command() {
+		public void run(Console cons, String[] args) throws Exception {
+		    if(args.length >= 2) {
+			Class<? extends Camera> ct = camtypes.get(args[1]);
+			String[] cargs = Utils.splice(args, 2);
+			if(ct != null) {
+				camera = makecam(ct, cargs);
+				Utils.setpref("defcam", args[1]);
+				Utils.setprefb("camargs", Utils.serialize(cargs));
+			} else {
+			    throw(new Exception("no such camera: " + args[1]));
 			}
-		});
-
-
+		    }
+		}
+	    });
 	cmdmap.put("whyload", new Console.Command() {
 		public void run(Console cons, String[] args) throws Exception {
 		    Loading l = lastload;
@@ -2947,176 +2328,4 @@ public class MapView extends PView implements DTarget, Console.Directory, PFList
 		}
 	    });
     }
-	//ND: Using this "setcam" to change the camera in OptWnd.java. This depends on ui.gui inside Widget.java
-	public void setcam(String name, String... opts) throws Exception {
-		Class<? extends Camera> ct = camtypes.get(name);
-		if(ct != null) {
-			camera = makecam(ct, opts);
-			Utils.setpref("defcam", name);
-			Utils.setprefb("camargs", Utils.serialize(opts));
-		} else {
-			throw(new Exception("no such camera: " + name));
-		}
-	}
-	// ND: These functions are used to snap the camera in NDFree and NDOrtho.
-	public void snapCameraNorth() {
-		camera.snap(Direction.NORTH);
-	}
-	public void snapCameraSouth() {
-		camera.snap(Direction.SOUTH);
-	}
-	public void snapCameraWest() {
-		camera.snap(Direction.WEST);
-	}
-	public void snapCameraEast() {
-		camera.snap(Direction.EAST);
-	}
-
-	public void pfDone(final Pathfinder thread) {
-		if (haven.automated.pathfinder.Map.DEBUG_TIMINGS)
-			System.out.println("-= PF DONE =-");
-	}
-
-	public void registerAreaSelect(AreaSelectCallback callback) {
-		this.areaSelectCallback = callback;
-	}
-
-	public void unregisterAreaSelect() {
-		this.areaSelectCallback = null;
-		areaSelect = false;
-		selection.destroy();
-		selection = null;
-	}
-
-	public void pfLeftClickPrecise(Coord mc, String action){
-		haven.automated.pathfinder.Map.plbbox = 2;
-		pfLeftClick(mc, action);
-		haven.automated.pathfinder.Map.plbbox = 3;
-	}
-
-	public void pfRightClickPrecise(Gob gob, int meshid, int clickb, int modflags, String action){
-		haven.automated.pathfinder.Map.plbbox = 2;
-		pfRightClick(gob, meshid, clickb, modflags, action);
-		haven.automated.pathfinder.Map.plbbox = 3;
-	}
-
-	public void pfLeftClick(Coord mc, String action) {
-		try{
-		Gob player = player();
-		if (player == null)
-			return;
-		if (mc.dist(player.rc.floor()) > 11 * MAX_TILE_RANGE) {
-			Coord between = mc.sub(player.rc.floor());
-			double mul = 11 * MAX_TILE_RANGE / mc.dist(player.rc.floor());
-			mc = player.rc.floor().add(between.mul(mul));
-		}
-		synchronized (Pathfinder.class) {
-			if (pf != null) {
-				pf.terminate = true;
-				pfthread.interrupt();
-				// cancel movement
-				if (player.getattr(Moving.class) != null)
-					wdgmsg("gk", 27);
-			}
-
-			Coord src = player.rc.floor();
-			int gcx = haven.automated.pathfinder.Map.origin - (src.x - mc.x);
-			int gcy = haven.automated.pathfinder.Map.origin - (src.y - mc.y);
-			if (gcx < 0 || gcx >= haven.automated.pathfinder.Map.sz || gcy < 0 || gcy >= haven.automated.pathfinder.Map.sz)
-				return;
-
-			pf = new Pathfinder(this, new Coord(gcx, gcy), action);
-			pf.addListener(this);
-			pfthread = new Thread(pf, "Pathfinder");
-			pfthread.start();
-		}
-		} catch (Exception e){
-			e.getMessage();
-		}
-	}
-
-	public void pfRightClick(Gob gob, int meshid, int clickb, int modflags, String action) {
-		Gob player = player();
-		if (player == null)
-			return;
-		if (gob.rc.dist(player.rc) > 11 * MAX_TILE_RANGE) {
-			pfLeftClick(gob.rc.floor(), null);
-			return;
-		}
-		synchronized (Pathfinder.class) {
-			if (pf != null) {
-				pf.terminate = true;
-				pfthread.interrupt();
-				// cancel movement
-				if (player.getattr(Moving.class) != null)
-					wdgmsg("gk", 27);
-			}
-
-			Coord src = player.rc.floor();
-			int gcx = haven.automated.pathfinder.Map.origin - (src.x - gob.rc.floor().x);
-			int gcy = haven.automated.pathfinder.Map.origin - (src.y - gob.rc.floor().y);
-			if (gcx < 0 || gcx >= haven.automated.pathfinder.Map.sz || gcy < 0 || gcy >= haven.automated.pathfinder.Map.sz)
-				return;
-
-			pf = new Pathfinder(this, new Coord(gcx, gcy), gob, meshid, clickb, modflags, action);
-			pf.addListener(this);
-			pfthread = new Thread(pf, "Pathfinder");
-			pfthread.start();
-		}
-	}
-
-	public void addCheckpoint(Coord2d coord){
-		if(checkpointManager != null && checkpointManagerThread != null){
-			checkpointManager.addCoord(coord);
-		} else {
-			GameUI gameUI = ui.gui;
-			checkpointManager = new CheckpointManager(gameUI);
-			Window window = checkpointManager;
-			gameUI.add(window, new Coord(gameUI.sz.x/2 - window.sz.x/2 + 100, gameUI.sz.y - window.sz.y));
-			checkpointManagerThread = new Thread(checkpointManager, "CheckpointManager");
-			checkpointManagerThread.start();
-			checkpointManager.addCoord(coord);
-		}
-	}
-
-	public List<Coord2d> getCheckPointList(){
-		if(checkpointManager != null && checkpointManagerThread != null){
-			synchronized (checkpointManager.checkpointList){
-				return checkpointManager.getAllCoords();
-			}
-		}
-		return null;
-	}
-
-	@Override
-	public void wdgmsg(String msg, Object... args) {
-		GameUI gui = ui.gui;
-		if (gui != null && gui.refillWaterContainersThread != null && gui.refillWaterContainersThread.isAlive()){
-			if (msg.equals("drop")){
-				gui.refillWaterContainersThread.interrupt();
-				gui.refillWaterContainersThread = null;
-				gui.ui.msg("Water Refill was manually stopped (One container was also dropped).");
-			} else if (msg.equals("click")){
-				if (args.length == 4) {
-					if (args[2].toString().equals("1")) {
-						gui.refillWaterContainersThread.interrupt();
-						gui.refillWaterContainersThread = null;
-						gui.ui.msg("Water Refill was manually stopped.");
-					}
-				}
-			}
-		}
-		boolean safe = true;
-		if(MiningSafetyAssistant.preventMiningOutsideSupport){
-			Resource curs = ui.root.getcurs(Coord.z);
-			if (curs != null && curs.name.equals("gfx/hud/curs/mine") && msg.equals("sel")) {
-				safe = MiningSafetyAssistant.isAreaInSupportRange((Coord) args[0], (Coord) args[1], ui.gui);
-			}
-		}
-		if(safe){
-			super.wdgmsg(msg, args);
-		} else {
-			ui.error("Tile outside all (visible) support range. Preventing mining command");
-		}
-	}
 }

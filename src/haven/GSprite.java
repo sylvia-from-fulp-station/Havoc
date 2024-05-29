@@ -36,6 +36,7 @@ public abstract class GSprite implements Drawn {
 	private Message msg = null;
     static {
 	factories = Arrays.asList(new Factory[] {
+		AnimGSprite.fact,
 		StaticGSprite.fact,
 	    });
     }

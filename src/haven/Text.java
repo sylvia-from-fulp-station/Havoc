@@ -28,17 +28,16 @@ package haven;
 
 import java.awt.*;
 import java.awt.Graphics;
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.*;
-import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.function.*;
 
 public class Text implements Disposable {
     public static final Font serif = new Font("Serif", Font.PLAIN, 10);
     public static final Font sans  = new Font("Sans", Font.PLAIN, 10);
     public static final Font mono  = new Font("Monospaced", Font.PLAIN, 10);
-    //public static final Font fraktur = Resource.local().loadwait("ui/fraktur").flayer(Resource.Font.class).font; // ND: Dumb ass font
-	public static final Font fraktur = serif;
+    public static final Font fraktur = Resource.local().loadwait("ui/fraktur").flayer(Resource.Font.class).font;
     public static final Font dfont = sans;
     public static final Foundry std;
     public final BufferedImage img;
@@ -46,15 +45,9 @@ public class Text implements Disposable {
     private Tex tex;
     public static final Color black = Color.BLACK;
     public static final Color white = Color.WHITE;
-	public static final Font latin;
-	public static final Foundry num12boldFnd;
-	public static final Foundry num20boldFnd;
 	
     static {
 	std = new Foundry(sans, 10);
-		latin = new Font("Dialog", Font.PLAIN, 10);
-	num12boldFnd = new Text.Foundry(latin.deriveFont(Font.BOLD), 12).aa(true);
-	num20boldFnd = new Text.Foundry(latin.deriveFont(Font.BOLD), 20).aa(true);
     }
 	
     public static class Line extends Text {
@@ -189,42 +182,23 @@ public class Text implements Disposable {
 	    g.dispose();
 	    return(new Line(text, img, m));
 	}
+		
 	public Line render(String text) {
 	    return(render(text, defcol));
 	}
 
-		public Line renderstroked(String text, Color c, Color stroke) {
-			Coord sz = strsize(text);
-			if (sz.x < 1)
-				sz = sz.add(1, 0);
-			sz = sz.add(2, 0);
-			BufferedImage img = TexI.mkbuf(sz);
-			Graphics g = img.createGraphics();
-			if (aa)
-				Utils.AA(g);
-			g.setFont(font);
-			FontMetrics m = g.getFontMetrics();
-			g.setColor(stroke);
-			g.drawString(text, 0, m.getAscent());
-			g.drawString(text, 2, m.getAscent());
-			g.drawString(text, 1, m.getAscent() - 1);
-			g.drawString(text, 1, m.getAscent() + 1);
-			g.setColor(c);
-			g.drawString(text, 1, m.getAscent());
-			g.dispose();
-			return (new Line(text, img, m));
-		}
-
-		public Line renderstroked2(String text, Color c, Color s){ // ND: This is Matias' version, it's better imo
-			Line line = render(text, c);
-			BufferedImage img = Utils.outline2(line.img, s, true);
-			return new Line(text, img, line.m);
-		}
-    }
-
-	public static Line renderstroked2(String text, Color c, Color s, Text.Foundry fnd) {
-		return fnd.renderstroked2(text, c, s);
+	public Line ellipsize(String text, int w, String e) {
+	    Line full = render(text);
+	    if(full.sz().x <= w)
+		return(full);
+	    int len = full.charat(w - strsize(e).x);
+	    return(render(text.substring(0, len) + e));
 	}
+
+	public Line ellipsize(String text, int w) {
+	    return(ellipsize(text, w, "\u2026"));
+	}
+    }
 
     public static abstract class Imager extends Furnace {
 	private final Furnace back;
@@ -287,34 +261,18 @@ public class Text implements Disposable {
 	public static UText forfield(Object obj, String fn) {
 	    return(forfield(std, obj, fn));
 	}
-    }
 
-	public static class UTex<T> implements Indir<Tex> {
-		public final Supplier<T> value;
-		public final Function<T, Tex> conv;
-		private Tex cur = null;
-		private T cv = null;
-
-		public UTex(Supplier<T> value, Function<T, Tex> conv) {
-			this.value = value;
-			this.conv = conv;
-		}
-
-		protected String text(T value) {
-			return (String.valueOf(value));
-		}
-
-		protected Tex render(T text) {
-			return (conv.apply(text));
-		}
-
-		public Tex get() {
-			T value = this.value.get();
-			if (!Utils.eq(value, cv))
-				cur = render(cv = value);
-			return (cur);
-		}
+	public static <T> UText<T> of(Furnace fnd, Supplier<? extends T> val, Function<? super T, String> fmt) {
+	    return(new UText<T>(fnd) {
+		    public T value() {return(val.get());}
+		    public String text(T value) {return(fmt.apply(value));}
+		});
 	}
+
+	public static <T> UText<T> of(Furnace fnd, Supplier<T> val) {
+	    return(of(fnd, val, String::valueOf));
+	}
+    }
 
     protected Text(String text, BufferedImage img) {
 	this.text = text;
@@ -332,25 +290,6 @@ public class Text implements Disposable {
     public static Line renderf(Color c, String text, Object... args) {
 	return(std.render(String.format(text, args), c));
     }
-
-	public static Line renderstroked(String text, Color c, Color s, Text.Foundry fnd) {
-		return fnd.renderstroked(text, c, s);
-	}
-	public static Line renderstroked(String text, Color c, Color s) {
-		return renderstroked(text, c, s, std);
-	}
-	public static Line renderstroked(String text, Color c) {
-		return renderstroked(text, c, Utils.contrast(c));
-	}
-	public static Line renderstroked(String text, Color c, Text.Foundry fnd) {
-		return renderstroked(text, c, Utils.contrast(c), fnd);
-	}
-	public static Line renderstroked(String text) {
-		return renderstroked(text, Color.WHITE, Color.BLACK);
-	}
-	public static Line renderstroked(String text, Text.Foundry fnd) {
-		return renderstroked(text, Color.WHITE, Color.BLACK, fnd);
-	}
 	
     public static Line render(String text) {
 	return(render(text, Color.WHITE));
@@ -397,8 +336,4 @@ public class Text implements Disposable {
 	    }
 	}
     }
-
-	public static Text create(String text, BufferedImage img) {
-		return (new Text(text, img));
-	}
 }
